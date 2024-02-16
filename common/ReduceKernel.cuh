@@ -3,6 +3,8 @@
 #include <cuda_runtime_api.h>
 #include <cuda_device_runtime_api.h>
 
+#define FULL_MASK (0xffffffffu)
+
 template <typename T>
 struct AddReducer {
 	__device__ void operator()(T& v, T o) { v += o; }
@@ -30,11 +32,11 @@ __device__ void dev_reduce_warp(int tid, T& value)
   REDUCER red;
   // warp shuffleÇ≈reduce
 #if CUDART_VERSION >= 9000
-  if (MAX >= 32) red(value, __shfl_down_sync(0xffffffff, value, 16));
-  if (MAX >= 16) red(value, __shfl_down_sync(0xffffffff, value, 8));
-  if (MAX >= 8) red(value, __shfl_down_sync(0xffffffff, value, 4));
-  if (MAX >= 4) red(value, __shfl_down_sync(0xffffffff, value, 2));
-  if (MAX >= 2) red(value, __shfl_down_sync(0xffffffff, value, 1));
+  if (MAX >= 32) red(value, __shfl_down_sync(FULL_MASK, value, 16));
+  if (MAX >= 16) red(value, __shfl_down_sync(FULL_MASK, value, 8));
+  if (MAX >= 8) red(value, __shfl_down_sync(FULL_MASK, value, 4));
+  if (MAX >= 4) red(value, __shfl_down_sync(FULL_MASK, value, 2));
+  if (MAX >= 2) red(value, __shfl_down_sync(FULL_MASK, value, 1));
 #else
   if (MAX >= 32) red(value, __shfl_down(value, 16));
   if (MAX >= 16) red(value, __shfl_down(value, 8));
@@ -97,11 +99,11 @@ __device__ void dev_reduceN_warp(int tid, T value[N])
   REDUCER red;
   // warp shuffleÇ≈reduce
 #if CUDART_VERSION >= 9000
-  if (MAX >= 32) for(int i = 0; i < N; ++i) red(value[i], __shfl_down_sync(0xffffffff, value[i], 16));
-  if (MAX >= 16) for (int i = 0; i < N; ++i) red(value[i], __shfl_down_sync(0xffffffff, value[i], 8));
-  if (MAX >= 8) for (int i = 0; i < N; ++i) red(value[i], __shfl_down_sync(0xffffffff, value[i], 4));
-  if (MAX >= 4) for (int i = 0; i < N; ++i) red(value[i], __shfl_down_sync(0xffffffff, value[i], 2));
-  if (MAX >= 2) for (int i = 0; i < N; ++i) red(value[i], __shfl_down_sync(0xffffffff, value[i], 1));
+  if (MAX >= 32) for(int i = 0; i < N; ++i) red(value[i], __shfl_down_sync(FULL_MASK, value[i], 16));
+  if (MAX >= 16) for (int i = 0; i < N; ++i) red(value[i], __shfl_down_sync(FULL_MASK, value[i], 8));
+  if (MAX >= 8) for (int i = 0; i < N; ++i) red(value[i], __shfl_down_sync(FULL_MASK, value[i], 4));
+  if (MAX >= 4) for (int i = 0; i < N; ++i) red(value[i], __shfl_down_sync(FULL_MASK, value[i], 2));
+  if (MAX >= 2) for (int i = 0; i < N; ++i) red(value[i], __shfl_down_sync(FULL_MASK, value[i], 1));
 #else
   if (MAX >= 32) for (int i = 0; i < N; ++i) red(value[i], __shfl_down(value[i], 16));
   if (MAX >= 16) for (int i = 0; i < N; ++i) red(value[i], __shfl_down(value[i], 8));
@@ -164,8 +166,8 @@ __device__ void dev_reduce2_warp(int tid, K& key, V& value)
   REDUCER red;
   if (MAX >= 32) {
 #if CUDART_VERSION >= 9000
-    K okey = __shfl_down_sync(0xffffffff, key, 16);
-    V ovalue = __shfl_down_sync(0xffffffff, value, 16);
+    K okey = __shfl_down_sync(FULL_MASK, key, 16);
+    V ovalue = __shfl_down_sync(FULL_MASK, value, 16);
 #else
     K okey = __shfl_down(key, 16);
     V ovalue = __shfl_down(value, 16);
@@ -174,8 +176,8 @@ __device__ void dev_reduce2_warp(int tid, K& key, V& value)
   }
   if (MAX >= 16) {
 #if CUDART_VERSION >= 9000
-    K okey = __shfl_down_sync(0xffffffff, key, 8);
-    V ovalue = __shfl_down_sync(0xffffffff, value, 8);
+    K okey = __shfl_down_sync(FULL_MASK, key, 8);
+    V ovalue = __shfl_down_sync(FULL_MASK, value, 8);
 #else
     K okey = __shfl_down(key, 8);
     V ovalue = __shfl_down(value, 8);
@@ -184,8 +186,8 @@ __device__ void dev_reduce2_warp(int tid, K& key, V& value)
   }
   if (MAX >= 8) {
 #if CUDART_VERSION >= 9000
-    K okey = __shfl_down_sync(0xffffffff, key, 4);
-    V ovalue = __shfl_down_sync(0xffffffff, value, 4);
+    K okey = __shfl_down_sync(FULL_MASK, key, 4);
+    V ovalue = __shfl_down_sync(FULL_MASK, value, 4);
 #else
     K okey = __shfl_down(key, 4);
     V ovalue = __shfl_down(value, 4);
@@ -194,8 +196,8 @@ __device__ void dev_reduce2_warp(int tid, K& key, V& value)
   }
   if (MAX >= 4) {
 #if CUDART_VERSION >= 9000
-    K okey = __shfl_down_sync(0xffffffff, key, 2);
-    V ovalue = __shfl_down_sync(0xffffffff, value, 2);
+    K okey = __shfl_down_sync(FULL_MASK, key, 2);
+    V ovalue = __shfl_down_sync(FULL_MASK, value, 2);
 #else
     K okey = __shfl_down(key, 2);
     V ovalue = __shfl_down(value, 2);
@@ -204,8 +206,8 @@ __device__ void dev_reduce2_warp(int tid, K& key, V& value)
   }
   if (MAX >= 2) {
 #if CUDART_VERSION >= 9000
-    K okey = __shfl_down_sync(0xffffffff, key, 1);
-    V ovalue = __shfl_down_sync(0xffffffff, value, 1);
+    K okey = __shfl_down_sync(FULL_MASK, key, 1);
+    V ovalue = __shfl_down_sync(FULL_MASK, value, 1);
 #else
     K okey = __shfl_down(key, 1);
     V ovalue = __shfl_down(value, 1);
@@ -263,13 +265,13 @@ __device__ void dev_reduce2(int tid, K& key, V& value, K* kbuf, V* vbuf)
 
 // MAXÇÕ<=32Ç©Ç¬2Ç◊Ç´ÇÃÇ›ëŒâû
 template <typename T, int MAX, typename REDUCER>
-__device__ void dev_scan_warp(int tid, T& value)
+__device__ void dev_scan_warp(int tid, T& value, const unsigned mask)
 {
   REDUCER red;
   // warp shuffleÇ≈scan
   if (MAX >= 2) {
 #if CUDART_VERSION >= 9000
-    T tmp = __shfl_up_sync(0xffffffff, value, 1);
+    T tmp = __shfl_up_sync(mask, value, 1);
 #else
     T tmp = __shfl_up(value, 1);
 #endif
@@ -277,7 +279,7 @@ __device__ void dev_scan_warp(int tid, T& value)
   }
   if (MAX >= 4) {
 #if CUDART_VERSION >= 9000
-    T tmp = __shfl_up_sync(0xffffffff, value, 2);
+    T tmp = __shfl_up_sync(mask, value, 2);
 #else
     T tmp = __shfl_up(value, 2);
 #endif
@@ -285,7 +287,7 @@ __device__ void dev_scan_warp(int tid, T& value)
   }
   if (MAX >= 8) {
 #if CUDART_VERSION >= 9000
-    T tmp = __shfl_up_sync(0xffffffff, value, 4);
+    T tmp = __shfl_up_sync(mask, value, 4);
 #else
     T tmp = __shfl_up(value, 4);
 #endif
@@ -293,7 +295,7 @@ __device__ void dev_scan_warp(int tid, T& value)
   }
   if (MAX >= 16) {
 #if CUDART_VERSION >= 9000
-    T tmp = __shfl_up_sync(0xffffffff, value, 8);
+    T tmp = __shfl_up_sync(mask, value, 8);
 #else
     T tmp = __shfl_up(value, 8);
 #endif
@@ -301,7 +303,7 @@ __device__ void dev_scan_warp(int tid, T& value)
   }
   if (MAX >= 32) {
 #if CUDART_VERSION >= 9000
-    T tmp = __shfl_up_sync(0xffffffff, value, 16);
+    T tmp = __shfl_up_sync(mask, value, 16);
 #else
     T tmp = __shfl_up(value, 16);
 #endif
@@ -317,15 +319,16 @@ __device__ void dev_scan(int tid, T& value, T* buf)
   REDUCER red;
   int wid = tid & 31;
   // Ç‹Ç∏warpì‡Ç≈scan
-  dev_scan_warp<T, MAX, REDUCER>(wid, value);
+  dev_scan_warp<T, MAX, REDUCER>(wid, value, FULL_MASK);
   if (MAX >= 64) {
     // warpÇ≤Ç∆ÇÃåãâ ÇsharedÉÅÉÇÉäÇâÓÇµÇƒèWñÒ
     if (wid == 31) buf[tid >> 5] = value;
     __syncthreads();
+    const unsigned mask = __ballot_sync(FULL_MASK, tid < MAX / 32);
     if (tid < MAX / 32) {
       // warpÇ≤Ç∆ÇÃåãâ Çwarpì‡Ç≈Ç≥ÇÁÇ…scan
       T v2 = buf[tid];
-      dev_scan_warp<T, MAX / 32, REDUCER>(wid, v2);
+      dev_scan_warp<T, MAX / 32, REDUCER>(wid, v2, mask);
       // sharedÉÅÉÇÉäÇâÓÇµÇƒï™îz
       buf[tid] = v2;
     }
