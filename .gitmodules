@@ -1,9 +1,3 @@
 [submodule "googletest"]
 	path = googletest
 	url = https://github.com/nekopanda/googletest.git
-[submodule "nnedi3"]
-	path = nnedi3
-	url = https://github.com/nekopanda/NNEDI3.git
-[submodule "masktools"]
-	path = masktools
-	url = https://github.com/nekopanda/masktools.git
