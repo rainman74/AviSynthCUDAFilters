@@ -1,3 +1,9 @@
 [submodule "googletest"]
 	path = googletest
 	url = https://github.com/nekopanda/googletest.git
+[submodule "masktools"]
+	path = masktools
+	url = https://github.com/rigaya/masktools.git
+[submodule "NNEDI3"]
+	path = NNEDI3
+	url = https://github.com/rigaya/NNEDI3.git
