@@ -142,6 +142,11 @@ class KFMSwitch : public KFMFilterBase
     ONLY_FRAME_DURATION = 2,
   };
 
+  struct FrameDurationInfo {
+      int duration;
+      bool isFrame24;
+  };
+
   VideoInfo srcvi;
 
   PClip clip24;
@@ -169,12 +174,13 @@ class KFMSwitch : public KFMFilterBase
 
   bool is30_60;
   bool is24_60;
+  bool is120;
 
   PulldownPatterns patterns;
 
 	// timecode生成用テンポラリ
 	std::string filepath;
-	std::vector<int> durations;
+	std::vector<FrameDurationInfo> durations;
 	int current;
 	bool complete;
 
@@ -368,9 +374,10 @@ class KFMSwitch : public KFMFilterBase
     return "???";
   }
 
-  int GetFrameDuration(int n60, FrameInfo& info, PNeoEnv env)
+  FrameDurationInfo GetFrameDuration(int n60, FrameInfo& info, PNeoEnv env)
   {
     int duration = 1;
+    bool isFrame24 = false;
     // 60fpsマージ部分がある場合は60fps
     if (thswitch < 0 || info.maskType == 0) {
       int source;
@@ -396,6 +403,7 @@ class KFMSwitch : public KFMFilterBase
         if (n60 + i >= vi.num_frames) {
           // フレーム数を超えてる
           duration = i;
+          isFrame24 = info.baseType == FRAME_24;
           break;
         }
         int cycleIndex = (n60 + i) / 10;
@@ -404,6 +412,7 @@ class KFMSwitch : public KFMFilterBase
         if (next.baseType != info.baseType) {
           // ベースタイプが違ったら同じフレームでない
           duration = i;
+          isFrame24 = info.baseType == FRAME_24;
           break;
         }
         else {
@@ -419,41 +428,57 @@ class KFMSwitch : public KFMFilterBase
           if (nextsource != source) {
             // ソースフレームが違ったら同じフレームでない
             duration = i;
+            isFrame24 = info.baseType == FRAME_24;
             break;
           }
         }
       }
     }
-    return duration;
+    return FrameDurationInfo{ duration, isFrame24 };
   }
 
-	int GetFrameDuration(int n60, PNeoEnv env)
-	{
-		PDevice cpudev = env->GetDevice(DEV_TYPE_CPU, 0);
-		int cycleIndex = n60 / 10;
-		KFMResult fm = *(Frame(env->GetFrame(fmclip, cycleIndex, cpudev)).GetReadPtr<KFMResult>());
-		FrameInfo info = GetFrameInfo(n60, fm, env);
-		return GetFrameDuration(n60, info, env);
-	}
+  FrameDurationInfo GetFrameDuration(int n60, PNeoEnv env)
+  {
+  	PDevice cpudev = env->GetDevice(DEV_TYPE_CPU, 0);
+  	int cycleIndex = n60 / 10;
+  	KFMResult fm = *(Frame(env->GetFrame(fmclip, cycleIndex, cpudev)).GetReadPtr<KFMResult>());
+  	FrameInfo info = GetFrameInfo(n60, fm, env);
+  	return GetFrameDuration(n60, info, env);
+  }
 
-	void WriteToFile(PNeoEnv env)
-	{
-		auto file = std::unique_ptr<TextFile>(new TextFile(filepath + ".duration.txt", "w", env));
-		for (int i = 0; i < (int)durations.size(); ++i) {
-			fprintf(file->fp, "%d\n", durations[i]);
-		}
-		file = nullptr;
+  void WriteToFile(PNeoEnv env)
+  {
+    std::vector<FrameDurationInfo> frame_list; // 120fps用のdurationリスト
+    frame_list.reserve(durations.size());
 
-		file = std::unique_ptr<TextFile>(new TextFile(filepath + ".timecode.txt", "w", env));
-		double elapsed = 0;
-		double tick = (double)vi.fps_denominator / vi.fps_numerator;
-		fprintf(file->fp, "# timecode format v2\n");
-		for (int i = 0; i < (int)durations.size(); ++i) {
-			fprintf(file->fp, "%d\n", (int)std::round(elapsed * 1000));
-			elapsed += durations[i] * tick;
-		}
-		file = nullptr;
-	}
+  	auto file = std::unique_ptr<TextFile>(new TextFile(filepath + ".duration.txt", "w", env));
+  	for (int i = 0; i < (int)durations.size(); i++) {
+  		fprintf(file->fp, "%d\n", durations[i].duration);
+        frame_list.push_back({ durations[i].duration * 2, durations[i].isFrame24 });
+  	}
+    file.reset();
+
+    if (is120) {
+        for (int i = 0; i < (int)durations.size(); i++) {
+            if (frame_list[i].isFrame24 && frame_list[i+1].isFrame24) {
+                if (frame_list[i + 0].duration + frame_list[i + 1].duration == 10) {
+                    frame_list[i + 0].duration = 5;
+                    frame_list[i + 1].duration = 5;
+                    i++;
+                }
+            }
+        }
+    }
+  	file = std::unique_ptr<TextFile>(new TextFile(filepath + ".timecode.txt", "w", env));
+  	double elapsed = 0.0;
+  	double tick = (double)vi.fps_denominator / vi.fps_numerator * 0.5;
+  	fprintf(file->fp, "# timecode format v2\n");
+  	for (int i = 0; i < (int)frame_list.size(); i++) {
+  		fprintf(file->fp, "%d\n", (int)std::round(elapsed * 1000));
+  		elapsed += frame_list[i].duration * tick;
+  	}
+    file.reset();
+  }
 
   template <typename pixel_t>
   PVideoFrame GetFrameTop(int n60, PNeoEnv env)
@@ -493,27 +518,27 @@ class KFMSwitch : public KFMFilterBase
       dst = env->NewVideoFrame(srcvi);
     }
 
-    int duration = 0;
+    FrameDurationInfo duration = { 0, false };
     if (mode != NORMAL) {
-			for (; current < n60; ) {
-				durations.push_back(GetFrameDuration(current, env));
-				current += durations.back();
-			}
+	  for (; current < n60; ) {
+	  	durations.push_back(GetFrameDuration(current, env));
+	  	current += durations.back().duration;
+	  }
       duration = GetFrameDuration(n60, info, env);
-			if (current == n60) {
-				durations.push_back(duration);
-				current += durations.back();
-			}
-			if (current >= vi.num_frames && complete == false) {
-				// ファイルに書き込む
-				WriteToFile(env);
-				complete = true;
-			}
+	  if (current == n60) {
+	  	durations.push_back(duration);
+	  	current += durations.back().duration;
+	  }
+	  if (current >= vi.num_frames && complete == false) {
+	  	// ファイルに書き込む
+	  	WriteToFile(env);
+	  	complete = true;
+	  }
     }
 
     if (show) {
       const char* fps = FrameTypeStr(info.baseType);
-      char buf[100]; sprintf(buf, "KFMSwitch: %s dur: %d pattern:%2d cost:%.3f", fps, duration, fm.pattern, fm.cost);
+      char buf[100]; sprintf(buf, "KFMSwitch: %s dur: %d pattern:%2d cost:%.3f", fps, duration.duration, fm.pattern, fm.cost);
       DrawText<pixel_t>(dst.frame, srcvi.BitsPerComponent(), 0, 0, buf, env);
       return dst.frame;
     }
@@ -526,7 +551,7 @@ public:
     PClip clip24, PClip mask24, PClip cc24,
     PClip clip30, PClip mask30, PClip cc30,
     PClip ucfclip,
-    float thswitch, int mode, const std::string& filepath,
+    float thswitch, int mode, const std::string& filepath, bool is120,
 		bool show, bool showflag, IScriptEnvironment* env)
     : KFMFilterBase(clip60)
     , srcvi(vi)
@@ -540,6 +565,7 @@ public:
     , ucfclip(ucfclip)
     , thswitch(thswitch)
     , mode(mode)
+    , is120(is120)
     , show(show)
     , showflag(showflag)
     , logUVx(vi.GetPlaneWidthSubsampling(PLANAR_U))
@@ -703,8 +729,9 @@ public:
       (float)args[9].AsFloat(3.0f),// thswitch
 			args[10].AsInt(0),           // mode
 			args[11].AsString("kfmswitch"),        // filepath
-      args[12].AsBool(false),      // show
-      args[13].AsBool(false),      // showflag
+	  args[12].AsBool(false),        // is120
+      args[13].AsBool(false),      // show
+      args[14].AsBool(false),      // showflag
       env
     );
   }
@@ -847,7 +874,7 @@ public:
 void AddFuncFMKernel(IScriptEnvironment* env)
 {
   env->AddFunction("KPatchCombe", "ccccc", KPatchCombe::Create, 0);
-  env->AddFunction("KFMSwitch", "cccccccc[ucfclip]c[thswitch]f[mode]i[filepath]s[show]b[showflag]b", KFMSwitch::Create, 0);
+  env->AddFunction("KFMSwitch", "cccccccc[ucfclip]c[thswitch]f[mode]i[filepath]s[is120]b[show]b[showflag]b", KFMSwitch::Create, 0);
   env->AddFunction("KFMPad", "c", KFMPad::Create, 0);
   env->AddFunction("KFMDecimate", "c[filepath]s", KFMDecimate::Create, 0);
   env->AddFunction("AssumeDevice", "ci", AssumeDevice::Create, 0);
