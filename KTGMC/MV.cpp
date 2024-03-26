@@ -2166,6 +2166,7 @@ class PlaneOfBlocksCUDA : public PlaneOfBlocksBase
   int* next;
   void* blocks;
   void* batchdata;
+  void* hbatchdata;
 
   enum { N_CONST_VEC = 4 };
 
@@ -2178,12 +2179,21 @@ class PlaneOfBlocksCUDA : public PlaneOfBlocksBase
   }
 
 public:
-  PlaneOfBlocksCUDA(MVPlaneParam p, IMVCUDA* cuda, PNeoEnv env)
-    : p(p)
-    , kernel(cuda->get(pixel_t()))
+  PlaneOfBlocksCUDA(MVPlaneParam p, IMVCUDA* cuda, PNeoEnv env) :
+      p(p),
+      kernel(cuda->get(pixel_t())),
+      vectors(nullptr),
+      sads(nullptr),
+      prog(nullptr),
+      next(nullptr),
+      blocks(nullptr),
+      batchdata(nullptr),
+      hbatchdata(nullptr)
   { }
 
-  ~PlaneOfBlocksCUDA() { }
+  ~PlaneOfBlocksCUDA() {
+      free(hbatchdata);
+  }
 
   int GetWorkSize()
   {
@@ -2307,17 +2317,22 @@ public:
     int nImgPitchY = nSrcPitchY * pSrcYPlane->GetExtendedHeight();
     int nImgPitchUV = (p.chroma ? (nSrcPitchUV * pSrcUPlane->GetExtendedHeight()) : 0);
 
-    kernel->Search(batch, batchdata, p.searchType, p.nBlkX, p.nBlkY, p.nBlkSizeX,
+    if (!hbatchdata) {
+        hbatchdata = malloc(ANALYZE_MAX_BATCH * kernel->GetSearchBatchSize());
+    }
+
+    kernel->Search(batch, out, batchdata, hbatchdata, p.searchType, p.nBlkX, p.nBlkY, p.nBlkSizeX,
       p.nLogScale, p.nLambdaLevel, p.lsad, p.penaltyZero,
       p.pglobal, p.penaltyNew, p.nPel, p.chroma,
       pSrcYPlane->GetHPadding(), nBlkSizeX, nExtendedWidth, nExtendedHeight,
       pSrcY, pSrcU, pSrcV, pRefY, pRefU, pRefV,
       nSrcPitchY, nSrcPitchUV, nImgPitchY, nImgPitchUV,
       (const short2*)globalMV, vectors, GetVectorsPitch(), sads, GetSadsPitch(), blocks, prog, next);
-
+#if 0
     for (int i = 0; i < batch; ++i) {
       kernel->StoreMV(out[i], vectors + vecPitch * i, sads + sadPitch * i, nCount);
     }
+#endif
   }
 
   void WriteDefault(VECTOR *out, int nCount)

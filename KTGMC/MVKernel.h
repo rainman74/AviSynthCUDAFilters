@@ -51,7 +51,7 @@ public:
 
   // 36 args
   virtual void Search(
-    int batch, void* _searchbatch,
+    int batch, VECTOR **out, void* _searchbatch, void* _hsearchbatch,
     int searchType, int nBlkX, int nBlkY, int nBlkSize, int nLogScale,
     int nLambdaLevel, int lsad, int penaltyZero, int penaltyGlobal, int penaltyNew,
     int nPel, bool chroma, int nPad, int nBlkSizeOvr, int nExtendedWidth, int nExptendedHeight,
