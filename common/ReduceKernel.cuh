@@ -2,21 +2,31 @@
 
 #include <cuda_runtime_api.h>
 #include <cuda_device_runtime_api.h>
+#include <type_traits>
 
 #define FULL_MASK (0xffffffffu)
 
+enum {
+    REDUCE_ADD,
+    REDUCE_MAX,
+    REDUCE_MAX_INDEX,
+};
+
 template <typename T>
 struct AddReducer {
+    const int type = REDUCE_ADD;
 	__device__ void operator()(T& v, T o) { v += o; }
 };
 
 template <typename T>
 struct MaxReducer {
+    const int type = REDUCE_MAX;
   __device__ void operator()(T& v, T o) { v = max(v, o); }
 };
 
 template <typename T>
 struct MaxIndexReducer {
+    const int type = REDUCE_MAX_INDEX;
 	__device__ void operator()(T& cnt, int& idx, T ocnt, int oidx) {
     if (ocnt > cnt) {
       cnt = ocnt;
@@ -29,20 +39,32 @@ struct MaxIndexReducer {
 template <typename T, int MAX, typename REDUCER>
 __device__ void dev_reduce_warp(int tid, T& value)
 {
-  REDUCER red;
-  // warp shuffle‚Åreduce
+    REDUCER red;
+    // warp shuffle‚Åreduce
+#if __CUDA_ARCH__ >= 800
+    if (red.type == REDUCE_ADD && std::is_integral<T>::value && sizeof(T) <= 4) {
+        unsigned v = value;
+        value = __reduce_add_sync(FULL_MASK, v);
+    } else if (red.type == REDUCE_MAX && std::is_integral<T>::value && sizeof(T) <= 4) {
+        unsigned v = value;
+        value = __reduce_max_sync(FULL_MASK, v);
+    } else {
+#endif
 #if CUDART_VERSION >= 9000
-  if (MAX >= 32) red(value, __shfl_down_sync(FULL_MASK, value, 16));
-  if (MAX >= 16) red(value, __shfl_down_sync(FULL_MASK, value, 8));
-  if (MAX >= 8) red(value, __shfl_down_sync(FULL_MASK, value, 4));
-  if (MAX >= 4) red(value, __shfl_down_sync(FULL_MASK, value, 2));
-  if (MAX >= 2) red(value, __shfl_down_sync(FULL_MASK, value, 1));
+        if (MAX >= 32) red(value, __shfl_down_sync(FULL_MASK, value, 16));
+        if (MAX >= 16) red(value, __shfl_down_sync(FULL_MASK, value, 8));
+        if (MAX >= 8) red(value, __shfl_down_sync(FULL_MASK, value, 4));
+        if (MAX >= 4) red(value, __shfl_down_sync(FULL_MASK, value, 2));
+        if (MAX >= 2) red(value, __shfl_down_sync(FULL_MASK, value, 1));
 #else
-  if (MAX >= 32) red(value, __shfl_down(value, 16));
-  if (MAX >= 16) red(value, __shfl_down(value, 8));
-  if (MAX >= 8) red(value, __shfl_down(value, 4));
-  if (MAX >= 4) red(value, __shfl_down(value, 2));
-  if (MAX >= 2) red(value, __shfl_down(value, 1));
+        if (MAX >= 32) red(value, __shfl_down(value, 16));
+        if (MAX >= 16) red(value, __shfl_down(value, 8));
+        if (MAX >= 8) red(value, __shfl_down(value, 4));
+        if (MAX >= 4) red(value, __shfl_down(value, 2));
+        if (MAX >= 2) red(value, __shfl_down(value, 1));
+#endif
+#if __CUDA_ARCH__ >= 800
+    }
 #endif
 }
 
