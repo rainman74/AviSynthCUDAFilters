@@ -22,6 +22,8 @@ public:
   virtual void MemCpy(void* dst, const void* src, int nbytes) = 0;
   virtual void Copy(pixel_t* dst, int dst_pitch, const pixel_t* src, int src_pitch, int width, int height) = 0;
   virtual void PadFrame(pixel_t *refFrame, int refPitch, int hPad, int vPad, int width, int height) = 0;
+  virtual void CopyPad(
+      pixel_t* dst, int dst_pitch, const pixel_t* src, int src_pitch, int hPad, int vPad, int width, int height) = 0;
   virtual void VerticalWiener(
     pixel_t *pDst, const pixel_t *pSrc, int nDstPitch,
     int nSrcPitch, int nWidth, int nHeight, int bits_per_pixel) = 0;

@@ -34,6 +34,31 @@ __global__ void memcpy_kernel(uint8_t* dst, const uint8_t* src, int nbytes) {
 // PadFrame
 /////////////////////////////////////////////////////////////////////////////
 
+
+template <typename pixel_t>
+__global__ void kl_copy_pad(
+    pixel_t* __restrict__ dst, int dst_pitch, const pixel_t* __restrict__ src, int src_pitch, int hPad, int vPad, int width, int height) {
+    int x = threadIdx.x + blockIdx.x * blockDim.x - hPad;
+    int y = threadIdx.y + blockIdx.y * blockDim.y - vPad;
+
+    if (x < width + hPad && y < height + vPad) {
+        int srcx = x;
+        if (srcx < 0) {
+            srcx = -srcx - 1;
+        } else if (srcx >= width) {
+            srcx = width - (srcx - width) - 1;
+        }
+        int srcy = y;
+        if (srcy < 0) {
+            srcy = -srcy - 1;
+        } else if (srcy >= height) {
+            srcy = height - (srcy - height) - 1;
+        }
+        pixel_t v = src[srcx + srcy * src_pitch];
+        dst[x + y * dst_pitch] = v;
+    }
+}
+
 // width ‚Í Pad ‚ðŠÜ‚Ü‚È‚¢’·‚³
 // block(2, -), threads(hPad, -)
 template <typename pixel_t>

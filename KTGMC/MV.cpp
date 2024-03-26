@@ -341,6 +341,7 @@ public:
   //virtual void SetInterp(int nRfilter, int nSharp) = 0;
   virtual void SetTarget(uint8_t* pSrc, int _nPitch) = 0;
   virtual void Fill(const uint8_t *_pNewPlane, int nNewPitch) = 0;
+  virtual void FillPad(const uint8_t *_pNewPlane, int nNewPitch) = 0;
   virtual void Pad() = 0;
   virtual void Refine() = 0;
   virtual void ReduceTo(KMPlaneBase* dstPlane) = 0;
@@ -453,6 +454,18 @@ public:
     {
       pPlane[i] = pSrc + i * nPitch * nExtendedHeight;
     }
+  }
+
+  void FillPad(const uint8_t *_pNewPlane, int nNewPitch)
+  {
+      const pixel_t* pNewPlane = (const pixel_t*)_pNewPlane;
+
+      if (kernel->IsEnabled()) {
+          kernel->CopyPad(pPlane[0] + nOffsetPadding, nPitch, pNewPlane, nNewPitch, nHPad, nVPad, nWidth, nHeight);
+      } else {
+          Copy(pPlane[0] + nOffsetPadding, nPitch, pNewPlane, nNewPitch, nWidth, nHeight);
+          PadFrame(pPlane[0], nPitch, nHPad, nVPad, nWidth, nHeight);
+      }
   }
 
   void Fill(const uint8_t *_pNewPlane, int nNewPitch)
@@ -575,6 +588,15 @@ public:
     }
   }
 
+  void FillPad(const uint8_t * pSrcY, int pitchY, const uint8_t * pSrcU, int pitchU, const uint8_t *pSrcV, int pitchV)
+  {
+      pYPlane->FillPad(pSrcY, pitchY);
+      if (param->chroma) {
+          pUPlane->FillPad(pSrcU, pitchU);
+          pVPlane->FillPad(pSrcV, pitchV);
+      }
+  }
+
   void Fill(const uint8_t * pSrcY, int pitchY, const uint8_t * pSrcU, int pitchU, const uint8_t *pSrcV, int pitchV)
   {
     pYPlane->Fill(pSrcY, pitchY);
@@ -660,8 +682,12 @@ public:
 
   void Construct(const uint8_t * pSrcY, int pitchY, const uint8_t * pSrcU, int pitchU, const uint8_t *pSrcV, int pitchV)
   {
+#if 0
     pFrames[0]->Fill(pSrcY, pitchY, pSrcU, pitchU, pSrcV, pitchV);
     pFrames[0]->Pad();
+#else
+    pFrames[0]->FillPad(pSrcY, pitchY, pSrcU, pitchU, pSrcV, pitchV);
+#endif
     pFrames[0]->Refine();
 
     for (int i = 0; i < param->nLevels - 1; i++)
