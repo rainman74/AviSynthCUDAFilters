@@ -32,6 +32,8 @@ public:
     int nSrcPitch, int nWidth, int nHeight, int bits_per_pixel) = 0;
   virtual void RB2BilinearFiltered(
     pixel_t *pDst, const pixel_t *pSrc, int nDstPitch, int nSrcPitch, int nWidth, int nHeight) = 0;
+  virtual void RB2BilinearFilteredPad(
+      pixel_t *pDst, const pixel_t *pSrc, int nDstPitch, int nSrcPitch, int hPad, int vPad, int nWidth, int nHeight) = 0;
 
   // Analyze //
   virtual int GetSearchBlockSize() = 0;

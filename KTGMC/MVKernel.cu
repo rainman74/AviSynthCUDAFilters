@@ -224,6 +224,87 @@ __global__ void kl_RB2B_bilinear_filtered(
   }
 }
 
+
+template <typename pixel_t>
+__global__ void kl_RB2B_bilinear_filtered_with_pad(
+    pixel_t *pDst, const pixel_t *pSrc, int nDstPitch, int nSrcPitch, int nWidth, int nHeight,
+    int hpad, int vpad)
+{
+    __shared__ pixel_t tmp[RB2B_BILINEAR_H][RB2B_BILINEAR_W];
+
+    const int tx = threadIdx.x;
+    const int ty = threadIdx.y;
+
+    // Verticalを実行
+    // Horizontalで参照するため両端1列ずつ余分に実行
+    int x = tx - 1 + blockIdx.x * (RB2B_BILINEAR_W - 2);
+    const int y = ty + blockIdx.y * RB2B_BILINEAR_H;
+    const int y2 = y * 2;
+
+    if (x >= 0 && x < nWidth * 2) {
+        pixel_t val;
+        pixel_t s1 = pSrc[x + (y2 + 0) * nSrcPitch];
+        pixel_t s2 = pSrc[x + (y2 + 1) * nSrcPitch];
+        if (y < 1) {
+            val = (s1 + s2 + 1) >> 1;
+        } else if (y < nHeight - 1) {
+            pixel_t s0 = pSrc[x + (y2 - 1) * nSrcPitch];
+            pixel_t s3 = pSrc[x + (y2 + 2) * nSrcPitch];
+            val = (s0 + s1 * 3 + s2 * 3 + s3 + 4) >> 3;
+        } else if (y < nHeight) {
+            val = (s1 + s2 + 1) >> 1;
+        }
+        tmp[ty][tx] = val;
+    }
+
+    __syncthreads();
+
+    // Horizontalを実行
+    x = tx + blockIdx.x * ((RB2B_BILINEAR_W - 2) / 2);
+    const int tx2 = tx * 2;
+
+    if (tx < ((RB2B_BILINEAR_W - 2) / 2) && y < nHeight) {
+        pixel_t val;
+        pixel_t s1 = tmp[ty][tx2 + 1];
+        pixel_t s2 = tmp[ty][tx2 + 2];
+        // tmpは[0][1]が原点であることに注意
+        if (x < 1) {
+            val = (s1 + s2 + 1) >> 1;
+        } else if (x < nWidth - 1) {
+            pixel_t s0 = tmp[ty][tx2];
+            pixel_t s3 = tmp[ty][tx2 + 3];
+            val = (s0 + s1 * 3 + s2 * 3 + s3 + 4) >> 3;
+        } else if (x < nWidth) {
+            val = (s1 + s2 + 1) >> 1;
+        }
+        pDst[x + y * nDstPitch] = val;
+
+        // ここまではpadなし版と同じ
+        // ここからpaddingの処理
+        int dstx = 0;
+        if (x < hpad) {
+            dstx = -x - 1;
+        } else if (x >= nWidth - hpad) {
+            dstx = nWidth + (nWidth - x) - 1;
+        }
+        if (dstx != 0) {
+            pDst[dstx + y * nDstPitch] = val;
+        }
+        int dsty = 0;
+        if (y < vpad) {
+            dsty = -y - 1;
+        } else if (y >= nHeight - vpad) {
+            dsty = nHeight + (nHeight - y) - 1;
+        }
+        if (dsty != 0) {
+            pDst[x + dsty * nDstPitch] = val;
+        }
+        if (dstx != 0 && dsty != 0) {
+            pDst[dstx + dsty * nDstPitch] = val;
+        }
+    }
+}
+
 /////////////////////////////////////////////////////////////////////////////
 // SearchMV
 /////////////////////////////////////////////////////////////////////////////

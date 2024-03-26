@@ -345,6 +345,7 @@ public:
   virtual void Pad() = 0;
   virtual void Refine() = 0;
   virtual void ReduceTo(KMPlaneBase* dstPlane) = 0;
+  virtual void ReduceToPad(KMPlaneBase* dstPlane) = 0;
 };
 
 template <typename pixel_t>
@@ -536,6 +537,25 @@ public:
       );
     }
   }
+
+  void ReduceToPad(KMPlaneBase *dstPlane) {
+    KMPlane<pixel_t>& red = *static_cast<KMPlane<pixel_t>*>(dstPlane);
+    if (kernel->IsEnabled()) {
+      kernel->RB2BilinearFilteredPad(
+        red.pPlane[0] + red.nOffsetPadding, pPlane[0] + nOffsetPadding,
+        red.nPitch, nPitch,
+        nHPad, nVPad,
+        red.nWidth, red.nHeight
+      );
+    } else {
+      RB2BilinearFiltered(
+        red.pPlane[0] + red.nOffsetPadding, pPlane[0] + nOffsetPadding,
+        red.nPitch, nPitch,
+        red.nWidth, red.nHeight
+      );
+      dstPlane->Pad();
+    }
+  }
 };
 
 class KMFrame
@@ -641,6 +661,15 @@ public:
       pVPlane->ReduceTo(pFrame->GetVPlane());
     }
   }
+
+  void	ReduceToPad(KMFrame *pFrame)
+  {
+      pYPlane->ReduceToPad(pFrame->GetYPlane());
+      if (param->chroma) {
+          pUPlane->ReduceToPad(pFrame->GetUPlane());
+          pVPlane->ReduceToPad(pFrame->GetVPlane());
+      }
+  }
 };
 
 class KMSuperFrame
@@ -692,8 +721,12 @@ public:
 
     for (int i = 0; i < param->nLevels - 1; i++)
     {
+#if 0
       pFrames[i]->ReduceTo(pFrames[i + 1].get());
       pFrames[i + 1]->Pad();
+#else
+      pFrames[i]->ReduceToPad(pFrames[i + 1].get());
+#endif
     }
   }
 
