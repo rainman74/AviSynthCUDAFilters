@@ -2332,6 +2332,28 @@ public:
   }
 };
 
+#if 1
+template <typename vpixel_t, typename F>
+__global__ void kl_box3_v(
+    vpixel_t* pDst,
+    const vpixel_t* __restrict__ pSrc,
+    int width4, int height, int pitch4
+)
+{
+    F f;
+
+    int x = threadIdx.x + blockIdx.x * blockDim.x;
+    int y = threadIdx.y + blockIdx.y * blockDim.y;
+
+    if (x < width4 && y < height) {
+        auto v1 = to_int(pSrc[x + (y + 0) * pitch4]);
+        auto v0 = (1 <= y)         ? v1 : to_int(pSrc[x + (y - 1) * pitch4]);
+        auto v2 = (y < height - 1) ? v1 : to_int(pSrc[x + (y + 1) * pitch4]);
+        auto tmp = f(v0, v1, v2);
+        pDst[x + y * pitch4] = VHelper<vpixel_t>::cast_to(tmp);
+    }
+}
+#else
 // è„â∫1ÉâÉCÉìï™ÇÕèúÇ¢ÇƒìnÇ∑
 template <typename vpixel_t, typename F>
 __global__ void kl_box3_v(
@@ -2384,6 +2406,7 @@ __global__ void kl_box3_v_border(
     pDst[x + y * pitch4] = VHelper<vpixel_t>::cast_to(tmp);
   }
 }
+#endif
 
 struct Resharpen {
   __device__ int4 operator()(int4 a, int4 b, int4 c) {
@@ -2421,6 +2444,15 @@ protected:
     int width4 = width / 4;
     int pitch4 = pitch / 4;
 
+#if 1
+    {
+      dim3 threads(32, 16);
+      dim3 blocks(nblocks(width4, threads.x), nblocks(height, threads.y));
+      kl_box3_v<vpixel_t, Resharpen> << <blocks, threads, 0, stream >> > (
+        (vpixel_t*)(pDst), (const vpixel_t*)(pSrc0), width4, height, pitch4);
+      DEBUG_SYNC;
+    }
+#else
     {
       dim3 threads(32, 16);
       dim3 blocks(nblocks(width4, threads.x), nblocks(height - 2, threads.y));
@@ -2435,6 +2467,7 @@ protected:
         (vpixel_t*)pDst, (const vpixel_t*)pSrc0, width4, height, pitch4);
       DEBUG_SYNC;
     }
+#endif
   }
 
 public:
