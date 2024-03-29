@@ -1733,6 +1733,31 @@ __global__ void kl_scene_change(const VECTOR* mv, int nBlks, int nTh1, int* scen
   }
 }
 
+// スレッド数: 256（合計: nBlks）
+__global__ void kl_scene_change_x2(const VECTOR* mv0, const VECTOR* mv1, int nBlks, int nTh1, int* sceneChange0, int* sceneChange1)
+{
+    enum {
+        DIMX = 256,
+    };
+
+    int tid = threadIdx.x;
+    int x = tid + blockIdx.x * blockDim.x;
+    const VECTOR* mv = (blockIdx.y == 0) ? mv0 : mv1;
+    int* sceneChange = (blockIdx.y == 0) ? sceneChange0 : sceneChange1;
+
+    int s = 0;
+    if (x < nBlks) {
+        s = (mv[x].sad > nTh1) ? 1 : 0;
+    }
+
+    __shared__ int sbuf[DIMX];
+    dev_reduce<int, DIMX, AddReducer<int>>(tid, s, sbuf);
+
+    if (tid == 0) {
+        atomicAdd(sceneChange, s);
+    }
+}
+
 template <typename pixel_t, int N>
 struct DegrainBlockData {
   const short *winOver;
@@ -3014,15 +3039,25 @@ public:
     kl_init_scene_change << <1, numRef, 0, stream >> > (sceneChange);
     DEBUG_SYNC;
     for (int i = 0; i < N; ++i) {
-      dim3 threads(256);
-      dim3 blocks(nblocks(numBlks, threads.x));
+      const VECTOR *mv[2] = { nullptr, nullptr };
+      int* sceneChange[2] = { nullptr, nullptr };
+      int block_y = 0;
       if (isUsableB[i]) {
-        kl_scene_change << <blocks, threads, 0, stream >> > (mvB[i], numBlks, nTh1, &sceneChangeB[i]);
+          mv[block_y] = mvB[i];
+          sceneChange[block_y] = &sceneChangeB[i];
+          block_y++;
       }
       if (isUsableF[i]) {
-        kl_scene_change << <blocks, threads, 0, stream >> > (mvF[i], numBlks, nTh1, &sceneChangeF[i]);
+          mv[block_y] = mvF[i];
+          sceneChange[block_y] = &sceneChangeF[i];
+          block_y++;
       }
-      DEBUG_SYNC;
+      if (block_y > 0) {
+        dim3 threads(256);
+        dim3 blocks(nblocks(numBlks, threads.x), block_y);
+        kl_scene_change_x2 << <blocks, threads, 0, stream >> > (mv[0], mv[1], numBlks, nTh1, sceneChange[0], sceneChange[1]);
+        DEBUG_SYNC;
+      }
     }
 
     DEGRAINN degrain;
