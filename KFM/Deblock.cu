@@ -756,6 +756,23 @@ void cpu_deblock_avx(
 }
 
 template <int RADIUS>
+__global__ void kl_max_vh(uint8_t* dst, uint8_t* src, int width, int height, int pitch)
+{
+    int x = threadIdx.x + blockIdx.x * blockDim.x;
+    int y = threadIdx.y + blockIdx.y * blockDim.y;
+
+    if (x < width && y < height) {
+        uint8_t sum = 0;
+        for (int j = -RADIUS; j <= RADIUS; j++) {
+            for (int i = -RADIUS; i <= RADIUS; i++) {
+                sum = max(sum, src[(x + i) + (y + j) * pitch]);
+            }
+        }
+        dst[x + y * pitch] = sum;
+    }
+}
+
+template <int RADIUS>
 __global__ void kl_max_v(uchar4* dst, uchar4* src, int width, int height, int pitch)
 {
     int x = threadIdx.x + blockIdx.x * blockDim.x;
@@ -881,22 +898,32 @@ class QPForDeblock : public KFMFilterBase
         Frame pad = env->NewVideoFrame(padvi);
         Frame tmp = env->NewVideoFrame(padvi);
 
-        Copy(pad.GetWritePtr<uint8_t>() + 8 + 8 * pad.GetPitch<uint8_t>(),
-            pad.GetPitch<uint8_t>(), dcframe->GetReadPtr(), dcframe->GetPitch(),
-            width, height, env);
-
         int width4 = (width + 3) >> 2;
 
         if (IS_CUDA) {
-            kl_padv<vpixel_t> <<<dim3(nblocks(width4, 32)), dim3(32, 8), 0, stream>>> (
-                pad.GetWritePtr<vpixel_t>() + 2 + 8 * pad.GetPitch<vpixel_t>(),
-                width4, height, pad.GetPitch<vpixel_t>(), 8);
-            DEBUG_SYNC;
-            kl_padh<uint8_t> <<<dim3(1, nblocks(height + 8 * 2, 32)), dim3(8, 32), 0, stream>>> (
-                pad.GetWritePtr<uint8_t>() + 8, width, height + 8 * 2,
-                pad.GetPitch<uint8_t>(), 8);
-            DEBUG_SYNC;
+            if (true) {
+                dim3 threads(32, 8);
+                dim3 blocks(nblocks(width + 2 * 8, threads.x * 4), nblocks(height + 2 * 8, threads.y));
+                kl_copy_pad<vpixel_t> <<<blocks, threads, 0, stream>>> (pad.GetWritePtr<vpixel_t>() + 2 + 8 * pad.GetPitch<vpixel_t>(),
+                    pad.GetPitch<vpixel_t>(), (vpixel_t *)dcframe->GetReadPtr(), dcframe->GetPitch() >> 2, width >> 2, height, 8 >> 2, 8);
+                DEBUG_SYNC;
+            } else {
+                Copy(pad.GetWritePtr<uint8_t>() + 8 + 8 * pad.GetPitch<uint8_t>(),
+                    pad.GetPitch<uint8_t>(), dcframe->GetReadPtr(), dcframe->GetPitch(),
+                    width, height, env);
+                kl_padv<vpixel_t> << <dim3(nblocks(width4, 32)), dim3(32, 8), 0, stream >> > (
+                    pad.GetWritePtr<vpixel_t>() + 2 + 8 * pad.GetPitch<vpixel_t>(),
+                    width4, height, pad.GetPitch<vpixel_t>(), 8);
+                DEBUG_SYNC;
+                kl_padh<uint8_t> << <dim3(1, nblocks(height + 8 * 2, 32)), dim3(8, 32), 0, stream >> > (
+                    pad.GetWritePtr<uint8_t>() + 8, width, height + 8 * 2,
+                    pad.GetPitch<uint8_t>(), 8);
+                DEBUG_SYNC;
+            }
         } else {
+            Copy(pad.GetWritePtr<uint8_t>() + 8 + 8 * pad.GetPitch<uint8_t>(),
+                pad.GetPitch<uint8_t>(), dcframe->GetReadPtr(), dcframe->GetPitch(),
+                width, height, env);
             cpu_padv<vpixel_t>(
                 pad.GetWritePtr<vpixel_t>() + 2 + 8 * pad.GetPitch<vpixel_t>(),
                 width >> 2, height, pad.GetPitch<vpixel_t>(), 8);
@@ -906,16 +933,24 @@ class QPForDeblock : public KFMFilterBase
         }
 
         if (IS_CUDA) {
-            kl_max_v<5> <<<dim3(nblocks(width4, 32), nblocks(height, 8)), dim3(32, 8), 0, stream>>> (
-                tmp.GetWritePtr<vpixel_t>() + 2 + 8 * tmp.GetPitch<vpixel_t>(),
-                pad.GetWritePtr<vpixel_t>() + 2 + 8 * pad.GetPitch<vpixel_t>(),
-                width4, height, pad.GetPitch<vpixel_t>());
-            DEBUG_SYNC;
-            kl_max_h<5> <<<dim3(nblocks(width, 32), nblocks(height, 8)), dim3(32, 8), 0, stream>>> (
-                pad.GetWritePtr<uint8_t>() + 8 + 8 * pad.GetPitch<uint8_t>(),
-                tmp.GetWritePtr<uint8_t>() + 8 + 8 * tmp.GetPitch<uint8_t>(),
-                width, height, pad.GetPitch<uint8_t>());
-            DEBUG_SYNC;
+            if (true) {
+                kl_max_vh<5> <<<dim3(nblocks(width, 32), nblocks(height, 8)), dim3(32, 8), 0, stream >>> (
+                    tmp.GetWritePtr<uint8_t>() + 8 + 8 * tmp.GetPitch<uint8_t>(),
+                    pad.GetWritePtr<uint8_t>() + 8 + 8 * pad.GetPitch<uint8_t>(),
+                    width, height, pad.GetPitch<uint8_t>());
+                DEBUG_SYNC;
+            } else {
+                kl_max_v<5> << <dim3(nblocks(width4, 32), nblocks(height, 8)), dim3(32, 8), 0, stream >> > (
+                    tmp.GetWritePtr<vpixel_t>() + 2 + 8 * tmp.GetPitch<vpixel_t>(),
+                    pad.GetWritePtr<vpixel_t>() + 2 + 8 * pad.GetPitch<vpixel_t>(),
+                    width4, height, pad.GetPitch<vpixel_t>());
+                DEBUG_SYNC;
+                kl_max_h<5> << <dim3(nblocks(width, 32), nblocks(height, 8)), dim3(32, 8), 0, stream >> > (
+                    pad.GetWritePtr<uint8_t>() + 8 + 8 * pad.GetPitch<uint8_t>(),
+                    tmp.GetWritePtr<uint8_t>() + 8 + 8 * tmp.GetPitch<uint8_t>(),
+                    width, height, pad.GetPitch<uint8_t>());
+                DEBUG_SYNC;
+            }
         } else {
             cpu_max_v<5>(
                 tmp.GetWritePtr<vpixel_t>() + 2 + 8 * tmp.GetPitch<vpixel_t>(),
@@ -1486,19 +1521,28 @@ class KDeblock : public KFMFilterBase
         padvi.pixel_type = GetYType(vi);
         Frame pad = env->NewVideoFrame(padvi);
 
-        Copy(pad.GetWritePtr<pixel_t>() + 8 + 8 * pad.GetPitch<pixel_t>(),
-            pad.GetPitch<pixel_t>(), src, srcPitch, width, height, env);
-
         if (IS_CUDA) {
-            kl_padv<vpixel_t> <<<dim3(nblocks(width >> 2, 32)), dim3(32, 8), 0, stream>>> (
-                pad.GetWritePtr<vpixel_t>() + 2 + 8 * pad.GetPitch<vpixel_t>(),
-                width >> 2, height, pad.GetPitch<vpixel_t>(), 8);
-            DEBUG_SYNC;
-            kl_padh<pixel_t> <<<dim3(1, nblocks(height + 8 * 2, 32)), dim3(8, 32), 0, stream>>> (
-                pad.GetWritePtr<pixel_t>() + 8, width, height + 8 * 2,
-                pad.GetPitch<pixel_t>(), 8);
-            DEBUG_SYNC;
+            if (true) {
+                dim3 threads(32, 8);
+                dim3 blocks(nblocks(width + 2*8, threads.x*4), nblocks(height + 2 * 8, threads.y));
+                kl_copy_pad<vpixel_t><<<blocks, threads, 0, stream>>>((vpixel_t *)(pad.GetWritePtr<pixel_t>() + 8 + 8 * pad.GetPitch<pixel_t>()),
+                    pad.GetPitch<pixel_t>() >> 2, (vpixel_t *)src, srcPitch >> 2, width >> 2, height, 8 >> 2, 8);
+                DEBUG_SYNC;
+            } else {
+                Copy(pad.GetWritePtr<pixel_t>() + 8 + 8 * pad.GetPitch<pixel_t>(),
+                    pad.GetPitch<pixel_t>(), src, srcPitch, width, height, env);
+                kl_padv<vpixel_t> <<<dim3(nblocks(width >> 2, 32)), dim3(32, 8), 0, stream>>> (
+                    pad.GetWritePtr<vpixel_t>() + 2 + 8 * pad.GetPitch<vpixel_t>(),
+                    width >> 2, height, pad.GetPitch<vpixel_t>(), 8);
+                DEBUG_SYNC;
+                kl_padh<pixel_t> <<<dim3(1, nblocks(height + 8 * 2, 32)), dim3(8, 32), 0, stream>>> (
+                    pad.GetWritePtr<pixel_t>() + 8, width, height + 8 * 2,
+                    pad.GetPitch<pixel_t>(), 8);
+                DEBUG_SYNC;
+            }
         } else {
+            Copy(pad.GetWritePtr<pixel_t>() + 8 + 8 * pad.GetPitch<pixel_t>(),
+                pad.GetPitch<pixel_t>(), src, srcPitch, width, height, env);
             cpu_padv<vpixel_t>(
                 pad.GetWritePtr<vpixel_t>() + 2 + 8 * pad.GetPitch<vpixel_t>(),
                 width >> 2, height, pad.GetPitch<vpixel_t>(), 8);

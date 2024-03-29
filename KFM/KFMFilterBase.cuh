@@ -108,6 +108,9 @@ template <typename pixel_t>
 void cpu_padv(pixel_t* dst, int width, int height, int pitch, int vpad);
 
 template <typename pixel_t>
+__global__ void kl_copy_pad(pixel_t *dst, const int dstpitch4, const pixel_t *src, const int srcpitch4, const int width4, const int height, const int hpad4, const int vpad);
+
+template <typename pixel_t>
 __global__ void kl_padv(pixel_t* dst, int width, int height, int pitch, int vpad);
 
 template <typename pixel_t>

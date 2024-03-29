@@ -189,6 +189,47 @@ __global__ void kl_max(pixel_t* dst, const pixel_t* __restrict__ src0, const pix
 template __global__ void kl_max(uint8_t* dst, const uint8_t* __restrict__ src0, const uint8_t* __restrict__ src1, int width, int height, int pitch);
 //template __global__ void kl_max(uchar4* dst, const uchar4* __restrict__ src0, const uchar4* __restrict__ src1, int width, int height, int pitch);
 
+template <typename T> __device__ void inline swap(T& a, T& b) {
+    T c(a); a = b; b = c;
+}
+
+template <typename vpixel_t>
+__global__ void kl_copy_pad(
+    vpixel_t *dst, const int dstpitch4, // 2行分を想定
+    const vpixel_t *src, const int srcpitch4, // 2行分を想定
+    const int width4, const int height,
+    const int hpad4, const int vpad) {
+    const int x = threadIdx.x + blockIdx.x * blockDim.x - hpad4; // 1スレッド4pixel
+    const int y = threadIdx.y + blockIdx.y * blockDim.y - vpad;
+
+    if (x < width4 + hpad4 && y < height + vpad) {
+        bool padx = true;
+        int srcx = x;
+        if (srcx < 0) {
+            srcx = -srcx - 1;
+        } else if (srcx >= width4) {
+            srcx = width4 - (srcx - width4) - 1;
+        } else {
+            padx = false;
+        }
+        int srcy = y;
+        if (srcy < 0) {
+            srcy = -srcy - 1;
+        } else if (srcy >= height) {
+            srcy = height - (srcy - height) - 1;
+        }
+        vpixel_t v = src[srcx + srcy * srcpitch4];
+        if (padx) {
+            swap(v.x, v.w);
+            swap(v.y, v.z);
+        }
+        dst[x + y * dstpitch4] = v;
+    }
+}
+
+template __global__ void kl_copy_pad(uchar4 *dst, const int dstpitch4, const uchar4 *src, const int srcpitch4, const int width4, const int height, const int hpad4, const int vpad);
+template __global__ void kl_copy_pad(ushort4 *dst, const int dstpitch4, const ushort4 *src, const int srcpitch4, const int width4, const int height, const int hpad4, const int vpad);
+
 template <typename pixel_t>
 void cpu_padv(pixel_t* dst, int width, int height, int pitch, int vpad)
 {
