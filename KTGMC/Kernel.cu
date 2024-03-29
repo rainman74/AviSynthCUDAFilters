@@ -1348,14 +1348,17 @@ __global__ void kl_vertical_cleaner_median(
   vpixel_t* dst, const vpixel_t* __restrict__ pSrc, int width4, int height, int pitch4
 )
 {
-  int x = threadIdx.x + blockIdx.x * blockDim.x;
-  int y = threadIdx.y + blockIdx.y * blockDim.y;
+  const int x = threadIdx.x + blockIdx.x * blockDim.x;
+  const int y = threadIdx.y + blockIdx.y * blockDim.y;
 
   if (x < width4 && y < height) {
-    int4 a = to_int(pSrc[x + (y - 1) * pitch4]);
-    int4 b = to_int(pSrc[x + y * pitch4]);
-    int4 c = to_int(pSrc[x + (y + 1) * pitch4]);
-    int4 tmp = min(max(min(a, b), c), max(a, b));
+    int4 tmp = to_int(pSrc[x + y * pitch4]);
+    if (1 <= y && y < height - 1) {
+        int4 a = to_int(pSrc[x + (y - 1) * pitch4]);
+        int4 b = tmp;
+        int4 c = to_int(pSrc[x + (y + 1) * pitch4]);
+        tmp = min(max(min(a, b), c), max(a, b));
+    }
     dst[x + y * pitch4] = VHelper<vpixel_t>::cast_to(tmp);
   }
 }
@@ -1408,28 +1411,28 @@ class KVerticalCleaner : public CUDAFilterBase {
       }
 
       dim3 threads(32, 16);
-      dim3 blocks(nblocks(width4, threads.x), nblocks(height - 2, threads.y));
+      dim3 blocks(nblocks(width4, threads.x), nblocks(height, threads.y));
 
       switch (mode) {
       case 1:
         // vertical median
         kl_vertical_cleaner_median<vpixel_t>
           << <blocks, threads, 0, stream >> > (
-          (vpixel_t*)(pDst + pitch), (const vpixel_t*)(pSrc + pitch), width4, height - 2, pitch4);
+          (vpixel_t*)(pDst), (const vpixel_t*)(pSrc), width4, height, pitch4);
         DEBUG_SYNC;
         break;
 
       default:
         env->ThrowError("[KVerticalCleaner] Unsupported mode %d", modes[p]);
       }
-
+#if 0
       {
         dim3 threads(256);
         dim3 blocks(nblocks(width, threads.x), 2);
         kl_copy_boarder1_v << <blocks, threads, 0, stream >> > (pDst, pSrc, width, height, pitch);
         DEBUG_SYNC;
       }
-
+#endif
     }
 
     return dst;
