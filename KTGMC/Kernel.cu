@@ -815,16 +815,20 @@ __global__ void kl_box3x3_filter(
   Horizontal horizontal;
   Vertical vertical;
 
-  int x = threadIdx.x + blockDim.x * blockIdx.x;
-  int y = threadIdx.y + blockDim.y * blockIdx.y;
+  const int x = threadIdx.x + blockDim.x * blockIdx.x;
+  const int y = threadIdx.y + blockDim.y * blockIdx.y;
 
   if (x < width && y < height) {
-    int tmp = vertical(
-      horizontal(pSrc[x - 1 + (y - 1) * pitch], pSrc[x + (y - 1) * pitch], pSrc[x + 1 + (y - 1) * pitch]),
-      horizontal(pSrc[x - 1 + y * pitch], pSrc[x + y * pitch], pSrc[x + 1 + y * pitch]),
-      horizontal(pSrc[x - 1 + (y + 1) * pitch], pSrc[x + (y + 1) * pitch], pSrc[x + 1 + (y + 1) * pitch]));
-    tmp = clamp(tmp, 0, (sizeof(pixel_t) == 1) ? 255 : 65535);
-    pDst[x + y * pitch] = tmp;
+      const int s = pSrc[x + y * pitch];
+      int tmp = s;
+      if (1 <= x && x < width - 1 && 1 <= y && y < height - 1) {
+          tmp = vertical(
+              horizontal(pSrc[x - 1 + (y - 1) * pitch], pSrc[x + (y - 1) * pitch], pSrc[x + 1 + (y - 1) * pitch]),
+              horizontal(pSrc[x - 1 + y * pitch], s, pSrc[x + 1 + y * pitch]),
+              horizontal(pSrc[x - 1 + (y + 1) * pitch], pSrc[x + (y + 1) * pitch], pSrc[x + 1 + (y + 1) * pitch]));
+          tmp = clamp(tmp, 0, (sizeof(pixel_t) == 1) ? 255 : 65535);
+      }
+      pDst[x + y * pitch] = tmp;
   }
 }
 
@@ -935,36 +939,37 @@ template <typename pixel_t, int N>
 __global__ void kl_rg_clip(
   pixel_t* pDst, const pixel_t* __restrict__ pSrc, int width, int height, int pitch)
 {
-  int x = threadIdx.x + blockDim.x * blockIdx.x;
-  int y = threadIdx.y + blockDim.y * blockIdx.y;
-
+  const int x = threadIdx.x + blockDim.x * blockIdx.x;
+  const int y = threadIdx.y + blockDim.y * blockIdx.y;
   if (x < width && y < height) {
-    int a0 = pSrc[x - 1 + (y - 1) * pitch];
-    int a1 = pSrc[x + (y - 1) * pitch];
-    int a2 = pSrc[x + 1 + (y - 1) * pitch];
-    int a3 = pSrc[x - 1 + y * pitch];
-    int s = pSrc[x + y * pitch];
-    int a4 = pSrc[x + 1 + y * pitch];
-    int a5 = pSrc[x - 1 + (y + 1) * pitch];
-    int a6 = pSrc[x + (y + 1) * pitch];
-    int a7 = pSrc[x + 1 + (y + 1) * pitch];
+    const int s = pSrc[x + y * pitch];
+    int tmp = s;
+    if (1 <= x && x < width-1 && 1 <= y && y < height - 1) {
+      int a0 = pSrc[x - 1 + (y - 1) * pitch];
+      int a1 = pSrc[x + (y - 1) * pitch];
+      int a2 = pSrc[x + 1 + (y - 1) * pitch];
+      int a3 = pSrc[x - 1 + y * pitch];
+      int a4 = pSrc[x + 1 + y * pitch];
+      int a5 = pSrc[x - 1 + (y + 1) * pitch];
+      int a6 = pSrc[x + (y + 1) * pitch];
+      int a7 = pSrc[x + 1 + (y + 1) * pitch];
 
-    dev_sort_8elem<int, IntCompareAndSwap>(a0, a1, a2, a3, a4, a5, a6, a7);
+      dev_sort_8elem<int, IntCompareAndSwap>(a0, a1, a2, a3, a4, a5, a6, a7);
 
-    int tmp;
-    switch (N) {
-    case 1: // 1st
-      tmp = clamp(s, a0, a7);
-      break;
-    case 2: // 2nd
-      tmp = clamp(s, a1, a6);
-      break;
-    case 3: // 3rd
-      tmp = clamp(s, a2, a5);
-      break;
-    case 4: // 4th
-      tmp = clamp(s, a3, a4);
-      break;
+      switch (N) {
+      case 1: // 1st
+          tmp = clamp(s, a0, a7);
+          break;
+      case 2: // 2nd
+          tmp = clamp(s, a1, a6);
+          break;
+      case 3: // 3rd
+          tmp = clamp(s, a2, a5);
+          break;
+      case 4: // 4th
+          tmp = clamp(s, a3, a4);
+          break;
+      }
     }
     pDst[x + y * pitch] = tmp;
   }
@@ -1059,59 +1064,59 @@ class KRemoveGrain : public CUDAFilterBase {
       }
 
       dim3 threads(32, 16);
-      dim3 blocks(nblocks(width - 2, threads.x), nblocks(height - 2, threads.y));
+      dim3 blocks(nblocks(width, threads.x), nblocks(height, threads.y));
 
       switch (mode) {
       case 1:
         // Clips the pixel with the minimum and maximum of the 8 neighbour pixels.
         kl_rg_clip<pixel_t, 1>
-          << <blocks, threads, 0, stream >> > (pDst + pitch + 1, pSrc + pitch + 1, width - 2, height - 2, pitch);
+          << <blocks, threads, 0, stream >> > (pDst, pSrc, width, height, pitch);
         DEBUG_SYNC;
         break;
       case 2:
         // Clips the pixel with the second minimum and maximum of the 8 neighbour pixels
         kl_rg_clip<pixel_t, 2>
-          << <blocks, threads, 0, stream >> > (pDst + pitch + 1, pSrc + pitch + 1, width - 2, height - 2, pitch);
+          << <blocks, threads, 0, stream >> > (pDst, pSrc, width, height, pitch);
         DEBUG_SYNC;
         break;
       case 3:
         // Clips the pixel with the third minimum and maximum of the 8 neighbour pixels.
         kl_rg_clip<pixel_t, 3>
-          << <blocks, threads, 0, stream >> > (pDst + pitch + 1, pSrc + pitch + 1, width - 2, height - 2, pitch);
+          << <blocks, threads, 0, stream >> > (pDst, pSrc, width, height, pitch);
         DEBUG_SYNC;
         break;
       case 4:
         // Clips the pixel with the fourth minimum and maximum of the 8 neighbour pixels, which is equivalent to a median filter.
         kl_rg_clip<pixel_t, 4>
-          << <blocks, threads, 0, stream >> > (pDst + pitch + 1, pSrc + pitch + 1, width - 2, height - 2, pitch);
+          << <blocks, threads, 0, stream >> > (pDst, pSrc, width, height, pitch);
         DEBUG_SYNC;
         break;
       case 11:
       case 12:
         // [1 2 1] horizontal and vertical kernel blur
         kl_box3x3_filter<pixel_t, RG11Horizontal, RG11Vertical>
-          << <blocks, threads, 0, stream >> > (pDst + pitch + 1, pSrc + pitch + 1, width - 2, height - 2, pitch);
+          << <blocks, threads, 0, stream >> > (pDst, pSrc, width, height, pitch);
         DEBUG_SYNC;
         break;
 
       case 20:
         // Averages the 9 pixels ([1 1 1] horizontal and vertical blur)
         kl_box3x3_filter<pixel_t, RG20Horizontal, RG20Vertical>
-          << <blocks, threads, 0, stream >> > (pDst + pitch + 1, pSrc + pitch + 1, width - 2, height - 2, pitch);
+          << <blocks, threads, 0, stream >> > (pDst, pSrc, width, height, pitch);
         DEBUG_SYNC;
         break;
 
       default:
         env->ThrowError("[KRemoveGrain] Unsupported mode %d", modes[p]);
       }
-
+#if 0
       {
         dim3 threads(256);
         dim3 blocks(nblocks(max(height, width), threads.x), 4);
         kl_copy_boarder1 << <blocks, threads, 0, stream >> > (pDst, pSrc, width, height, pitch);
         DEBUG_SYNC;
       }
-
+#endif
     }
 
     return dst;
