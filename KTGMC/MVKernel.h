@@ -38,6 +38,7 @@ public:
   // Analyze //
   virtual int GetSearchBlockSize() = 0;
   virtual int GetSearchBatchSize() = 0;
+  virtual int GetLoadMVBatchSize() = 0;
   virtual void EstimateGlobalMV(int batch, const short2* vectors, int vectorsPitch, int nBlkCount, short2* globalMV) = 0;
   virtual void InterpolatePrediction(
     int batch,
@@ -47,6 +48,8 @@ public:
     int normFactor, int normov, int atotal, int aodd, int aeven) = 0;
   virtual void LoadMV(const VECTOR* in, short2* vectors, int* sads, int nBlkCount) = 0;
   virtual void StoreMV(VECTOR* out, const short2* vectors, const int* sads, int nBlkCount) = 0;
+  virtual void LoadMVBatch(void* _loadmvbatch, void* _hloadmvbatch, int batch,
+      const VECTOR** in, VECTOR** out, short2* vectors, int vectorsPitch, int* sads, int sadPitch, int nBlkCount) = 0;
   virtual void WriteDefaultMV(VECTOR* dst, int nBlkCount, int verybigSAD) = 0;
 
   // 36 args

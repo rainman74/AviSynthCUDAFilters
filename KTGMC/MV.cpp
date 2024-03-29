@@ -2167,6 +2167,8 @@ class PlaneOfBlocksCUDA : public PlaneOfBlocksBase
   void* blocks;
   void* batchdata;
   void* hbatchdata;
+  void *loadmvbatchdata;
+  void *hloadmvbatchdata;
 
   enum { N_CONST_VEC = 4 };
 
@@ -2188,7 +2190,9 @@ public:
       next(nullptr),
       blocks(nullptr),
       batchdata(nullptr),
-      hbatchdata(nullptr)
+      hbatchdata(nullptr),
+      loadmvbatchdata(nullptr),
+      hloadmvbatchdata(nullptr)
   { }
 
   ~PlaneOfBlocksCUDA() {
@@ -2200,7 +2204,8 @@ public:
     return GetVectorsPitch() * p.batch * sizeof(short2) +
       (GetSadsPitch() + 1 + p.nBlkX) * p.batch * sizeof(int) +
       p.nBlkCount * p.batch * kernel->GetSearchBlockSize() +
-      p.batch * kernel->GetSearchBatchSize();
+      p.batch * kernel->GetSearchBatchSize() +
+      p.batch * kernel->GetLoadMVBatchSize();
   }
 
   void SetWorkMemory(uint8_t* work)
@@ -2211,6 +2216,7 @@ public:
     next = &prog[p.nBlkX * p.batch];
     blocks = (void*)&next[1 * p.batch];
     batchdata = (void*)&((uint8_t*)blocks)[p.nBlkCount * kernel->GetSearchBlockSize() * p.batch];
+    loadmvbatchdata = (void*)&((uint8_t*)blocks)[p.batch * kernel->GetSearchBatchSize() * p.batch];
 
     // オフセットしておく
     vectors += N_CONST_VEC;
@@ -2268,11 +2274,17 @@ public:
 
     int vecPitch = GetVectorsPitch();
     int sadPitch = GetSadsPitch();
-
+#if 0
     for (int i = 0; i < batch; ++i) {
       kernel->MemCpy(out[i], src[i], nCount * sizeof(VECTOR));
       kernel->LoadMV(src[i], vectors + vecPitch * i, sads + sadPitch * i, nCount);
     }
+#else
+    if (!hloadmvbatchdata) {
+        hloadmvbatchdata = malloc(ANALYZE_MAX_BATCH * kernel->GetLoadMVBatchSize());
+    }
+    kernel->LoadMVBatch(loadmvbatchdata, hloadmvbatchdata, batch, src, out, vectors, vecPitch, sads, sadPitch, nCount);
+#endif
   }
 
   void SearchMVs(int batch, KMFrame **pSrcFrame, KMFrame **pRefFrame, const VECTOR *globalMV, VECTOR **out, int nCount)

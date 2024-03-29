@@ -1605,6 +1605,46 @@ __global__ void kl_interpolate_prediction(
   }
 }
 
+template <typename pixel_t>
+struct LoadMVBatch {
+    VECTOR *out;
+    int* sad;
+    const VECTOR* src;
+    short2* vectors; // [x,y]
+};
+
+template <typename pixel_t>
+union LoadMVBatchData {
+    enum {
+        LEN = sizeof(LoadMVBatch<pixel_t>) / sizeof(int)
+    };
+    LoadMVBatch<pixel_t> d;
+    int data[LEN];
+};
+
+template <typename pixel_t>
+__global__ void kl_load_mv_batch(
+    LoadMVBatchData<pixel_t> *pdata,
+    int nBlk) {
+    const int tx = threadIdx.x;
+    const int x = tx + blockIdx.x * blockDim.x;
+
+    __shared__ LoadMVBatchData<pixel_t> d;
+
+    if (tx < LoadMVBatchData<pixel_t>::LEN) {
+        d.data[tx] = pdata[blockIdx.y].data[x];
+    }
+    __syncthreads();
+
+    if (x < nBlk) {
+        VECTOR vsrc = d.d.src[x];
+        short2 v = { (short)vsrc.x, (short)vsrc.y };
+        d.d.vectors[x] = v;
+        d.d.sad[x] = vsrc.sad;
+        d.d.out[x] = vsrc;
+    }
+}
+
 __global__ void kl_load_mv(
   const VECTOR* in,
   short2* vectors, // [x,y]
@@ -2404,6 +2444,7 @@ public:
     int nPitchY, int nPitchUV,
     int nImgPitchY, int nImgPitchUV, cudaStream_t stream)
   {
+    static_assert(SearchBatchData<pixel_t>::LEN <= BLK_SIZE * 8);
     dim3 threads(BLK_SIZE * 8);
     // 余分なブロックは仕事せずに終了するので問題ない
     dim3 blocks(batch, std::min(nBlkX, nBlkY));
@@ -2449,6 +2490,11 @@ public:
   int GetSearchBatchSize()
   {
     return sizeof(SearchBatchData<pixel_t>);
+  }
+
+  int GetLoadMVBatchSize()
+  {
+      return sizeof(LoadMVBatchData<pixel_t>);
   }
 
   void Search(
@@ -2625,6 +2671,30 @@ public:
       nSrcBlkX, nSrcBlkY, nDstBlkX, nDstBlkY,
       normFactor, normov, atotal, aodd, aeven);
     DEBUG_SYNC;
+  }
+
+  void LoadMVBatch(void* _loadmvbatch, void* _hloadmvbatch, int batch,
+      const VECTOR** src, VECTOR** out, short2* vectors, int vectorsPitch, int* sads, int sadPitch, int nBlkCount)
+  {
+      const int threadcount = 256;
+      static_assert(LoadMVBatchData<pixel_t>::LEN <= threadcount);
+      LoadMVBatchData<pixel_t>* loadmvbatch = (LoadMVBatchData<pixel_t>*)_loadmvbatch;
+      LoadMVBatchData<pixel_t>* hloadmvbatch = (LoadMVBatchData<pixel_t>*)_hloadmvbatch;
+
+      // パラメータを作る
+      for (int i = 0; i < batch; i++) {
+          hloadmvbatch[i].d.src = src[i];
+          hloadmvbatch[i].d.out = out[i];
+          hloadmvbatch[i].d.vectors = vectors + vectorsPitch * i;
+          hloadmvbatch[i].d.sad = sads + sadPitch * i;
+      }
+
+      CUDA_CHECK(cudaMemcpyAsync(loadmvbatch, hloadmvbatch, sizeof(loadmvbatch[0]) * batch, cudaMemcpyHostToDevice, stream));
+
+      dim3 threads(threadcount);
+      dim3 blocks(nblocks(nBlkCount, threads.x), batch);
+      kl_load_mv_batch << <blocks, threads, 0, stream >> > (loadmvbatch, nBlkCount);
+      DEBUG_SYNC;
   }
 
   void LoadMV(const VECTOR* in, short2* vectors, int* sads, int nBlkCount)
