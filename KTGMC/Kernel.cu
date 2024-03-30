@@ -1883,6 +1883,33 @@ public:
   }
 };
 
+
+// è„â∫2ÉâÉCÉìï™ÇÕèúÇ¢ÇƒìnÇ∑
+template <typename vpixel_t, typename F>
+__global__ void kl_box5_v_and_border(
+  vpixel_t* pDst,
+  const vpixel_t* __restrict__ pSrc,
+  int width4, int height, int pitch4
+)
+{
+  F f;
+
+  int x = threadIdx.x + blockIdx.x * blockDim.x;
+  int y = threadIdx.y + blockIdx.y * blockDim.y;
+
+  if (x < width4 && y < height) {
+    auto v2 = to_int(pSrc[x + (y + 0) * pitch4]);
+    auto v0 = (y - 2 >= 0)     ? to_int(pSrc[x + (y - 2) * pitch4]) : v2;
+    auto v1 = (y - 1 >= 0)     ? to_int(pSrc[x + (y - 1) * pitch4]) : v2;
+    auto v3 = (y + 1 < height) ? to_int(pSrc[x + (y + 1) * pitch4]) : v2;
+    auto v4 = (y + 2 < height) ? to_int(pSrc[x + (y + 2) * pitch4]) : v2;
+
+
+    auto tmp = f(v0, v1, v2, v3, v4);
+    pDst[x + y * pitch4] = VHelper<vpixel_t>::cast_to(tmp);
+  }
+}
+
 // è„â∫2ÉâÉCÉìï™ÇÕèúÇ¢ÇƒìnÇ∑
 template <typename vpixel_t, typename F>
 __global__ void kl_box5_v(
@@ -1980,20 +2007,29 @@ protected:
 
     int width4 = width / 4;
     int pitch4 = pitch / 4;
-
-    {
-      dim3 threads(32, 16);
-      dim3 blocks(nblocks(width4, threads.x), nblocks(height - 4, threads.y));
-      kl_box5_v<vpixel_t, F> << <blocks, threads, 0, stream >> > (
-        (vpixel_t*)(pDst + pitch * 2), (const vpixel_t*)(pSrc0 + pitch * 2), width4, height - 4, pitch4);
-      DEBUG_SYNC;
-    }
-    {
-      dim3 threads(32, 4);
-      dim3 blocks(nblocks(width4, threads.x));
-      kl_box5_v_border<vpixel_t, F> << <blocks, threads, 0, stream >> > (
-        (vpixel_t*)pDst, (const vpixel_t*)pSrc0, width4, height, pitch4);
-      DEBUG_SYNC;
+    if (true) {
+        {
+            dim3 threads(32, 16);
+            dim3 blocks(nblocks(width4, threads.x), nblocks(height, threads.y));
+            kl_box5_v_and_border<vpixel_t, F> << <blocks, threads, 0, stream >> > (
+                (vpixel_t*)pDst, (const vpixel_t*)pSrc0, width4, height, pitch4);
+            DEBUG_SYNC;
+        }
+    } else {
+        {
+            dim3 threads(32, 16);
+            dim3 blocks(nblocks(width4, threads.x), nblocks(height - 4, threads.y));
+            kl_box5_v<vpixel_t, F> << <blocks, threads, 0, stream >> > (
+                (vpixel_t*)(pDst + pitch * 2), (const vpixel_t*)(pSrc0 + pitch * 2), width4, height - 4, pitch4);
+            DEBUG_SYNC;
+        }
+        {
+            dim3 threads(32, 4);
+            dim3 blocks(nblocks(width4, threads.x));
+            kl_box5_v_border<vpixel_t, F> << <blocks, threads, 0, stream >> > (
+                (vpixel_t*)pDst, (const vpixel_t*)pSrc0, width4, height, pitch4);
+            DEBUG_SYNC;
+        }
     }
   }
 
