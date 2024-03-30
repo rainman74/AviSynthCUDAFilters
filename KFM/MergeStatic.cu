@@ -344,8 +344,12 @@ class KAnalyzeStatic : public KFMFilterBase
     else {
       Frame f0 = child->GetFrame(n, env);
       padded = Frame(env->NewVideoFrame(padvi), VPAD);
-      CopyFrame<pixel_t>(f0, padded, env);
-      PadFrame<pixel_t>(padded, env);
+      if (true) {
+          CopyFrameAndPad<pixel_t>(f0, padded, env);
+      } else {
+          CopyFrame<pixel_t>(f0, padded, env);
+          PadFrame<pixel_t>(padded, env);
+      }
     }
 
     Frame flagtmp = env->NewVideoFrame(vi);

@@ -611,6 +611,55 @@ void KFMFilterBase::PadFrame(Frame& dst, PNeoEnv env)
 template void KFMFilterBase::PadFrame<uint8_t>(Frame& dst, PNeoEnv env);
 template void KFMFilterBase::PadFrame<uint16_t>(Frame& dst, PNeoEnv env);
 
+template <typename pixel_t>
+void KFMFilterBase::CopyFrameAndPad(Frame& src, Frame& dst, PNeoEnv env)
+{
+  typedef typename VectorType<pixel_t>::type vpixel_t;
+  const pixel_t* srcY = src.GetReadPtr<pixel_t>(PLANAR_Y);
+  const pixel_t* srcU = src.GetReadPtr<pixel_t>(PLANAR_U);
+  const pixel_t* srcV = src.GetReadPtr<pixel_t>(PLANAR_V);
+  pixel_t* dstY = dst.GetWritePtr<pixel_t>(PLANAR_Y);
+  pixel_t* dstU = dst.GetWritePtr<pixel_t>(PLANAR_U);
+  pixel_t* dstV = dst.GetWritePtr<pixel_t>(PLANAR_V);
+
+  const int srcPitchY = src.GetPitch<pixel_t>(PLANAR_Y);
+  const int srcPitchUV = src.GetPitch<pixel_t>(PLANAR_U);
+  const int dstPitchY = dst.GetPitch<pixel_t>(PLANAR_Y);
+  const int dstPitchUV = dst.GetPitch<pixel_t>(PLANAR_U);
+
+  const int widthUV = srcvi.width >> logUVx;
+  const int heightUV = srcvi.height >> logUVy;
+  const int width4 = srcvi.width >> 2;
+  const int width4UV = width4 >> logUVx;
+
+  const int vpadUV = VPAD >> logUVy;
+
+  if (IS_CUDA) {
+    cudaStream_t stream = static_cast<cudaStream_t>(env->GetDeviceStream());
+    {
+      dim3 threads(32, 8);
+      dim3 blocks(nblocks(srcvi.width, threads.x * 4), nblocks(srcvi.height + 2 * VPAD, threads.y));
+      kl_copy_pad<vpixel_t> <<<blocks, threads, 0, stream >>> ((vpixel_t *)(dstY + VPAD * dstPitchY), dstPitchY >> 2, (vpixel_t *)srcY, srcPitchY >> 2, width4, srcvi.height, 0, VPAD);
+    }
+    {
+      dim3 threads(32, 8);
+      dim3 blocks(nblocks(widthUV, threads.x * 4), nblocks(heightUV + 2 * vpadUV, threads.y));
+      kl_copy_pad<vpixel_t> <<<blocks, threads, 0, stream >>> ((vpixel_t *)(dstU + vpadUV * dstPitchUV), dstPitchUV >> 2, (vpixel_t *)srcU, srcPitchUV >> 2, width4UV, heightUV, 0, vpadUV);
+      kl_copy_pad<vpixel_t> <<<blocks, threads, 0, stream >>> ((vpixel_t *)(dstV + vpadUV * dstPitchUV), dstPitchUV >> 2, (vpixel_t *)srcV, srcPitchUV >> 2, width4UV, heightUV, 0, vpadUV);
+    }
+  } else {
+    Copy(dstY, dstPitchY, srcY, srcPitchY, srcvi.width, srcvi.height, env);
+    Copy(dstU, dstPitchUV, srcU, srcPitchUV, widthUV, heightUV, env);
+    Copy(dstV, dstPitchUV, srcV, srcPitchUV, widthUV, heightUV, env);
+    cpu_padv<vpixel_t>((vpixel_t *)dstY, width4, srcvi.height, dstPitchY, VPAD);
+    cpu_padv<vpixel_t>((vpixel_t *)dstU, width4UV, heightUV, dstPitchUV, vpadUV);
+    cpu_padv<vpixel_t>((vpixel_t *)dstV, width4UV, heightUV, dstPitchUV, vpadUV);
+  }
+}
+
+template void KFMFilterBase::CopyFrameAndPad<uint8_t>(Frame& src, Frame& dst, PNeoEnv env);
+template void KFMFilterBase::CopyFrameAndPad<uint16_t>(Frame& src, Frame& dst, PNeoEnv env);
+
 template <typename vpixel_t>
 void KFMFilterBase::LaunchAnalyzeFrame(uchar4* dst, int dstPitch,
   const vpixel_t* base, const vpixel_t* sref, const vpixel_t* mref,

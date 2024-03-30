@@ -137,8 +137,12 @@ class KFieldDiff : public KFMFilterBase
     Frame padded = Frame(env->NewVideoFrame(padvi), VPAD);
     Frame work = env->NewVideoFrame(workvi);
 
-    CopyFrame<pixel_t>(src, padded, env);
-    PadFrame<pixel_t>(padded, env);
+    if (true) {
+        CopyFrameAndPad<pixel_t>(src, padded, env);
+    } else {
+        CopyFrame<pixel_t>(src, padded, env);
+        PadFrame<pixel_t>(padded, env);
+    }
     auto raw = CalcFieldDiff<pixel_t>(padded, work, env);
     raw /= 6; // ŒvŽZŽ®‚©‚ç
 
@@ -1015,10 +1019,15 @@ class KAnalyzeNoise : public KFMFilterBase
       Frame f1 = child->GetFrame(n + 1, env);
       f0padded = Frame(env->NewVideoFrame(padvi), VPAD);
       f1padded = Frame(env->NewVideoFrame(padvi), VPAD);
-      CopyFrame<uint8_t>(f0, f0padded, env);
-      PadFrame<uint8_t>(f0padded, env);
-      CopyFrame<uint8_t>(f1, f1padded, env);
-      PadFrame<uint8_t>(f1padded, env);
+      if (true) {
+          CopyFrameAndPad<uint8_t>(f0, f0padded, env);
+          CopyFrameAndPad<uint8_t>(f1, f1padded, env);
+      } else {
+          CopyFrame<uint8_t>(f0, f0padded, env);
+          PadFrame<uint8_t>(f0padded, env);
+          CopyFrame<uint8_t>(f1, f1padded, env);
+          PadFrame<uint8_t>(f1padded, env);
+      }
     }
 
     Frame dst = env->NewVideoFrame(vi);

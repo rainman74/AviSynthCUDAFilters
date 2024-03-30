@@ -27,6 +27,9 @@ protected:
   template <typename pixel_t>
   void PadFrame(Frame& dst, PNeoEnv env);
 
+  template <typename pixel_t>
+  void CopyFrameAndPad(Frame& src, Frame& dst, PNeoEnv env);
+
   template <typename vpixel_t>
   void LaunchAnalyzeFrame(uchar4* dst, int dstPitch,
     const vpixel_t* base, const vpixel_t* sref, const vpixel_t* mref,

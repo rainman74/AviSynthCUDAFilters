@@ -747,8 +747,12 @@ class KFMPad : public KFMFilterBase
     Frame src = child->GetFrame(n, env);
     Frame dst = Frame(env->NewVideoFrame(vi), VPAD);
 
-    CopyFrame<pixel_t>(src, dst, env);
-    PadFrame<pixel_t>(dst, env);
+    if (true) {
+        CopyFrameAndPad<pixel_t>(src, dst, env);
+    } else {
+        CopyFrame<pixel_t>(src, dst, env);
+        PadFrame<pixel_t>(dst, env);
+    }
 
     return dst.frame;
   }
