@@ -341,11 +341,11 @@ public:
   //virtual void SetInterp(int nRfilter, int nSharp) = 0;
   virtual void SetTarget(uint8_t* pSrc, int _nPitch) = 0;
   virtual void Fill(const uint8_t *_pNewPlane, int nNewPitch) = 0;
-  virtual void FillPad(const uint8_t *_pNewPlane, int nNewPitch) = 0;
+  virtual void FillPad(const uint8_t *_pNewPlane, int nNewPitch, void *stream_) = 0;
   virtual void Pad() = 0;
-  virtual void Refine() = 0;
+  virtual void Refine(void *stream_) = 0;
   virtual void ReduceTo(KMPlaneBase* dstPlane) = 0;
-  virtual void ReduceToPad(KMPlaneBase* dstPlane) = 0;
+  virtual void ReduceToPad(KMPlaneBase* dstPlane, void *stream_) = 0;
 };
 
 template <typename pixel_t>
@@ -457,12 +457,12 @@ public:
     }
   }
 
-  void FillPad(const uint8_t *_pNewPlane, int nNewPitch)
+  void FillPad(const uint8_t *_pNewPlane, int nNewPitch, void *stream_)
   {
       const pixel_t* pNewPlane = (const pixel_t*)_pNewPlane;
 
       if (kernel->IsEnabled()) {
-          kernel->CopyPad(pPlane[0] + nOffsetPadding, nPitch, pNewPlane, nNewPitch, nHPad, nVPad, nWidth, nHeight);
+          kernel->CopyPad(pPlane[0] + nOffsetPadding, nPitch, pNewPlane, nNewPitch, nHPad, nVPad, nWidth, nHeight, stream_);
       } else {
           Copy(pPlane[0] + nOffsetPadding, nPitch, pNewPlane, nNewPitch, nWidth, nHeight);
           PadFrame(pPlane[0], nPitch, nHPad, nVPad, nWidth, nHeight);
@@ -491,15 +491,15 @@ public:
     }
   }
 
-  void Refine()
+  void Refine(void *stream_)
   {
     if (kernel->IsEnabled()) {
       switch (nPel)
       {
       case 2:
-        kernel->HorizontalWiener(pPlane[1], pPlane[0], nPitch, nPitch, nExtendedWidth, nExtendedHeight, nBitsPerPixel);
-        kernel->VerticalWiener(pPlane[2], pPlane[0], nPitch, nPitch, nExtendedWidth, nExtendedHeight, nBitsPerPixel);
-        kernel->HorizontalWiener(pPlane[3], pPlane[2], nPitch, nPitch, nExtendedWidth, nExtendedHeight, nBitsPerPixel);
+        kernel->HorizontalWiener(pPlane[1], pPlane[0], nPitch, nPitch, nExtendedWidth, nExtendedHeight, nBitsPerPixel, stream_);
+        kernel->VerticalWiener(pPlane[2], pPlane[0], nPitch, nPitch, nExtendedWidth, nExtendedHeight, nBitsPerPixel, stream_);
+        kernel->HorizontalWiener(pPlane[3], pPlane[2], nPitch, nPitch, nExtendedWidth, nExtendedHeight, nBitsPerPixel, stream_);
         break;
         //case 4: // ç°ÇÕñ¢ëŒâû
         //  break;
@@ -538,14 +538,14 @@ public:
     }
   }
 
-  void ReduceToPad(KMPlaneBase *dstPlane) {
+  void ReduceToPad(KMPlaneBase *dstPlane, void *stream_) {
     KMPlane<pixel_t>& red = *static_cast<KMPlane<pixel_t>*>(dstPlane);
     if (kernel->IsEnabled()) {
       kernel->RB2BilinearFilteredPad(
         red.pPlane[0] + red.nOffsetPadding, pPlane[0] + nOffsetPadding,
         red.nPitch, nPitch,
         nHPad, nVPad,
-        red.nWidth, red.nHeight
+        red.nWidth, red.nHeight, stream_
       );
     } else {
       RB2BilinearFiltered(
@@ -610,10 +610,10 @@ public:
 
   void FillPad(const uint8_t * pSrcY, int pitchY, const uint8_t * pSrcU, int pitchU, const uint8_t *pSrcV, int pitchV)
   {
-      pYPlane->FillPad(pSrcY, pitchY);
+      pYPlane->FillPad(pSrcY, pitchY, param->chroma ? cuda->GetDeviceStreamY() : nullptr);
       if (param->chroma) {
-          pUPlane->FillPad(pSrcU, pitchU);
-          pVPlane->FillPad(pSrcV, pitchV);
+          pUPlane->FillPad(pSrcU, pitchU, cuda->GetDeviceStreamU());
+          pVPlane->FillPad(pSrcV, pitchV, cuda->GetDeviceStreamV());
       }
   }
 
@@ -637,10 +637,10 @@ public:
 
   void	Refine()
   {
-    pYPlane->Refine();
+    pYPlane->Refine(param->chroma ? cuda->GetDeviceStreamY() : nullptr);
     if (param->chroma) {
-      pUPlane->Refine();
-      pVPlane->Refine();
+      pUPlane->Refine(cuda->GetDeviceStreamU());
+      pVPlane->Refine(cuda->GetDeviceStreamV());
     }
   }
 
@@ -664,10 +664,10 @@ public:
 
   void	ReduceToPad(KMFrame *pFrame)
   {
-      pYPlane->ReduceToPad(pFrame->GetYPlane());
+      pYPlane->ReduceToPad(pFrame->GetYPlane(), param->chroma ? cuda->GetDeviceStreamY() : nullptr);
       if (param->chroma) {
-          pUPlane->ReduceToPad(pFrame->GetUPlane());
-          pVPlane->ReduceToPad(pFrame->GetVPlane());
+          pUPlane->ReduceToPad(pFrame->GetUPlane(), cuda->GetDeviceStreamU());
+          pVPlane->ReduceToPad(pFrame->GetVPlane(), cuda->GetDeviceStreamV());
       }
   }
 };
@@ -836,8 +836,10 @@ public:
     int nDstPitchUV = dst->GetPitch(PLANAR_U) >> params.nPixelShift;
 
     pSrcGOF->SetTarget(pDstY, nDstPitchY, pDstU, nDstPitchUV, pDstV, nDstPitchUV);
-    pSrcGOF->Construct(pSrcY, nSrcPitchY, pSrcU, nSrcPitchUV, pSrcV, nSrcPitchUV);
 
+    auto planeEvent = params.chroma ? cuda->CreateEventPlanes() : nullptr;
+    pSrcGOF->Construct(pSrcY, nSrcPitchY, pSrcU, nSrcPitchUV, pSrcV, nSrcPitchUV);
+    if (planeEvent) planeEvent->finPlane();
     return dst;
   }
 
@@ -4711,7 +4713,7 @@ class KMDegrainX : public GenericVideoFilter
       psrc, pdst, ptmp, prefB, prefF,
       nSrcPitchY, nSrcPitchUV,
       nSuperPitchY, nSuperPitchUV, nImgPitchY, nImgPitchUV,
-      degrainblock, degrainarg, sceneChange);
+      degrainblock, degrainarg, sceneChange, cuda.get());
 
     return dst;
   }

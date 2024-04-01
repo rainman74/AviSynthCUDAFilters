@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <memory>
+#include <deque>
 
 #include <cuda_runtime_api.h>
 #include <cuda_device_runtime_api.h>
@@ -2381,36 +2382,39 @@ public:
   }
 
   void CopyPad(
-      pixel_t* dst, int dst_pitch, const pixel_t* src, int src_pitch, int hPad, int vPad, int width, int height) {
+      pixel_t* dst, int dst_pitch, const pixel_t* src, int src_pitch, int hPad, int vPad, int width, int height, void *stream_) {
+      cudaStream_t st = (stream_) ? (cudaStream_t)stream_ : stream;
       dim3 threads(32, 16);
       dim3 blocks(nblocks(width + hPad*2, threads.x), nblocks(height + vPad*2, threads.y));
-      kl_copy_pad<pixel_t> << <blocks, threads, 0, stream >> > (
+      kl_copy_pad<pixel_t> << <blocks, threads, 0, st >> > (
           dst, dst_pitch, src, src_pitch, hPad, vPad, width, height);
       DEBUG_SYNC;
   }
 
   void VerticalWiener(
     pixel_t *pDst, const pixel_t *pSrc, int nDstPitch,
-    int nSrcPitch, int nWidth, int nHeight, int bits_per_pixel)
+    int nSrcPitch, int nWidth, int nHeight, int bits_per_pixel, void *stream_)
   {
     const int max_pixel_value = sizeof(pixel_t) == 1 ? 255 : (1 << bits_per_pixel) - 1;
 
+    cudaStream_t st = (stream_) ? (cudaStream_t)stream_ : stream;
     dim3 threads(32, 16);
     dim3 blocks(nblocks(nWidth, threads.x), nblocks(nHeight, threads.y));
-    kl_vertical_wiener<pixel_t> << <blocks, threads, 0, stream >> > (
+    kl_vertical_wiener<pixel_t> << <blocks, threads, 0, st >> > (
       pDst, pSrc, nDstPitch, nSrcPitch, nWidth, nHeight, max_pixel_value);
     DEBUG_SYNC;
   }
 
   void HorizontalWiener(
     pixel_t *pDst, const pixel_t *pSrc, int nDstPitch,
-    int nSrcPitch, int nWidth, int nHeight, int bits_per_pixel)
+    int nSrcPitch, int nWidth, int nHeight, int bits_per_pixel, void *stream_)
   {
     const int max_pixel_value = sizeof(pixel_t) == 1 ? 255 : (1 << bits_per_pixel) - 1;
 
+    cudaStream_t st = (stream_) ? (cudaStream_t)stream_ : stream;
     dim3 threads(32, 16);
     dim3 blocks(nblocks(nWidth, threads.x), nblocks(nHeight, threads.y));
-    kl_horizontal_wiener<pixel_t> << <blocks, threads, 0, stream >> > (
+    kl_horizontal_wiener<pixel_t> << <blocks, threads, 0, st >> > (
       pDst, pSrc, nDstPitch, nSrcPitch, nWidth, nHeight, max_pixel_value);
     DEBUG_SYNC;
   }
@@ -2426,11 +2430,12 @@ public:
   }
 
   void RB2BilinearFilteredPad(
-      pixel_t *pDst, const pixel_t *pSrc, int nDstPitch, int nSrcPitch, int hPad, int vPad, int nWidth, int nHeight)
+      pixel_t *pDst, const pixel_t *pSrc, int nDstPitch, int nSrcPitch, int hPad, int vPad, int nWidth, int nHeight, void *stream_)
   {
+      cudaStream_t st = (stream_) ? (cudaStream_t)stream_ : stream;
       dim3 threads(RB2B_BILINEAR_W, RB2B_BILINEAR_H);
       dim3 blocks(nblocks(nWidth + hPad * 2, RB2B_BILINEAR_W), nblocks(nHeight + vPad * 2, RB2B_BILINEAR_H));
-      kl_RB2B_bilinear_filtered_with_pad<pixel_t> << <blocks, threads, 0, stream >> > (
+      kl_RB2B_bilinear_filtered_with_pad<pixel_t> << <blocks, threads, 0, st >> > (
           pDst, pSrc, nDstPitch, nSrcPitch, nWidth, nHeight, hPad, vPad);
       DEBUG_SYNC;
   }
@@ -2743,11 +2748,12 @@ public:
     const int * sceneChangeF,
     const DegrainArg<pixel_t, N>* parg,
     DegrainBlock<pixel_t, N>* pblocks,
-    int nPitch, int nPitchSuper, int nImgPitch)
+    int nPitch, int nPitchSuper, int nImgPitch, void *stream_)
   {
+    cudaStream_t st = (stream_) ? (cudaStream_t)stream_ : stream;
     dim3 threads(32, 8);
     dim3 blocks(nblocks(nBlkX, threads.x), nblocks(nBlkY, threads.y));
-    kl_prepare_degrain<pixel_t, vpixel_t, N, NPEL, SHIFT, BINOMIAL> << <blocks, threads, 0, stream >> > (
+    kl_prepare_degrain<pixel_t, vpixel_t, N, NPEL, SHIFT, BINOMIAL> << <blocks, threads, 0, st >> > (
       nBlkX, nBlkY, nPad, nBlkSize, nTh2, thSAD, ovrwins, sceneChangeB, sceneChangeF, parg, pblocks, nPitch, nPitchSuper, nImgPitch);
     DEBUG_SYNC;
   }
@@ -2755,11 +2761,12 @@ public:
   template <int N, int BLK_SIZE, int M>
   void launch_degrain_2x3_small(
     int nPatternX, int nPatternY,
-    int nBlkX, int nBlkY, DegrainBlock<pixel_t, N>* data, tmp_t* pDst, int pitch, int pitchsuper)
+    int nBlkX, int nBlkY, DegrainBlock<pixel_t, N>* data, tmp_t* pDst, int pitch, int pitchsuper, void *stream_)
   {
+    cudaStream_t st = (stream_) ? (cudaStream_t)stream_ : stream;
     dim3 threads(BLK_SIZE, BLK_SIZE, M);
     dim3 blocks(nblocks(nBlkX, 3 * 2 * M), nblocks(nBlkY, 2 * 2));
-    kl_degrain_2x3<pixel_t, pixel_t, tmp_t, int, short, N, BLK_SIZE, M> << <blocks, threads, 0, stream >> > (
+    kl_degrain_2x3<pixel_t, pixel_t, tmp_t, int, short, N, BLK_SIZE, M> << <blocks, threads, 0, st >> > (
       nPatternX, nPatternY, nBlkX, nBlkY, data, pDst, pitch, pitchsuper);
     DEBUG_SYNC;
   }
@@ -2767,22 +2774,24 @@ public:
   template <int N, int BLK_SIZE, int M>
   void launch_degrain_2x3(
     int nPatternX, int nPatternY,
-    int nBlkX, int nBlkY, DegrainBlock<pixel_t, N>* data, tmp_t* pDst, int pitch4, int pitchsuper4)
+    int nBlkX, int nBlkY, DegrainBlock<pixel_t, N>* data, tmp_t* pDst, int pitch4, int pitchsuper4, void *stream_)
   {
+    cudaStream_t st = (stream_) ? (cudaStream_t)stream_ : stream;
     dim3 threads(BLK_SIZE / 4, BLK_SIZE, M);
     dim3 blocks(nblocks(nBlkX, 3 * 2 * M), nblocks(nBlkY, 2 * 2));
-    kl_degrain_2x3<pixel_t, vpixel_t, vtmp_t, int4, short4, N, BLK_SIZE, M> << <blocks, threads, 0, stream >> > (
+    kl_degrain_2x3<pixel_t, vpixel_t, vtmp_t, int4, short4, N, BLK_SIZE, M> << <blocks, threads, 0, st >> > (
       nPatternX, nPatternY, nBlkX, nBlkY, data, (vtmp_t*)pDst, pitch4, pitchsuper4);
     DEBUG_SYNC;
   }
 
   template <typename vpixel_t, typename vtmp_t>
   void launch_short_to_byte(
-    vpixel_t* dst, const vtmp_t* src, int width4, int height, int pitch4, int max_pixel_value)
+    vpixel_t* dst, const vtmp_t* src, int width4, int height, int pitch4, int max_pixel_value, void *stream_)
   {
+    cudaStream_t st = (stream_) ? (cudaStream_t)stream_ : stream;
     dim3 threads(32, 16);
     dim3 blocks(nblocks(width4, threads.x), nblocks(height, threads.y));
-    kl_short_to_byte<vpixel_t, vtmp_t> << <blocks, threads, 0, stream >> > (
+    kl_short_to_byte<vpixel_t, vtmp_t> << <blocks, threads, 0, st >> > (
       dst, src, width4, height, pitch4, max_pixel_value);
     DEBUG_SYNC;
   }
@@ -2796,7 +2805,7 @@ public:
     const VECTOR** mvB, const VECTOR** mvF,
     const pixel_t** pSrc, pixel_t** pDst, tmp_t** pTmp, const pixel_t** pRefB, const pixel_t** pRefF,
     int nPitch, int nPitchUV, int nPitchSuperY, int nPitchSuperUV, int nImgPitch, int nImgPitchUV,
-    void* _degrainblocks, void* _degraindarg, int *sceneChangeB, int *sceneChangeF
+    void* _degrainblocks, void* _degraindarg, int *sceneChangeB, int *sceneChangeF, IMVCUDA *cuda
     );
 
   // pTmpはpSrcと同じpitchであること
@@ -2810,7 +2819,7 @@ public:
     const VECTOR** mvB, const VECTOR** mvF,
     const pixel_t** pSrc, pixel_t** pDst, tmp_t** pTmp, const pixel_t** pRefB, const pixel_t** pRefF,
     int nPitchY, int nPitchUV, int nPitchSuperY, int nPitchSuperUV, int nImgPitchY, int nImgPitchUV,
-    void* _degrainblocks, void* _degraindarg, int *sceneChangeB, int *sceneChangeF
+    void* _degrainblocks, void* _degraindarg, int *sceneChangeB, int *sceneChangeF, IMVCUDA *cuda
   )
   {
 
@@ -2855,7 +2864,7 @@ public:
       const int * sceneChangeF,
       const DegrainArg<pixel_t, N>* parg,
       DegrainBlock<pixel_t, N>* blocks,
-      int nPitch, int nPitchSuper, int nImgPitch);
+      int nPitch, int nPitchSuper, int nImgPitch, void *stream_);
 
     PREPARE prepare_func, prepareuv_func;
 
@@ -2887,9 +2896,10 @@ public:
     DegrainBlock<pixel_t, N>* degrainblocks = (DegrainBlock<pixel_t, N>*)_degrainblocks;
     const int max_pixel_value = (1 << nBitsPerPixel) - 1;
 
+    auto planeEvent = cuda->CreateEventPlanes();
     // YUVループ
     for (int p = 0; p < 3; ++p) {
-
+      const auto planeStream = (cudaStream_t)cuda->GetDeviceStreamPlane(p);
       PREPARE prepare = (p == 0) ? prepare_func : prepareuv_func;
       int shift = (p == 0) ? 0 : 1;
       int blksize = nBlkSize >> shift;
@@ -2913,16 +2923,16 @@ public:
           (p == 0) ? thSAD : thSADC,
           (p == 0) ? ovrwins : overwinsUV,
           sceneChangeB, sceneChangeF, &dargs[p],
-          degrainblocks, pitch, pitchsuper, imgpitch);
+          degrainblocks, pitch, pitchsuper, imgpitch, planeStream);
 
         // pTmp初期化
         launch_elementwise<vtmp_t, SetZeroFunction<vtmp_t>>(
-          (vtmp_t*)pTmp[p], width_b4, height_b, pitch4, stream);
+          (vtmp_t*)pTmp[p], width_b4, height_b, pitch4, planeStream);
         DEBUG_SYNC;
 
         void(Me::*degrain_func)(
           int nPatternX, int nPatternY,
-          int nBlkX, int nBlkY, DegrainBlock<pixel_t, N>* data, tmp_t* pDst, int pitchX, int pitchsuperX);
+          int nBlkX, int nBlkY, DegrainBlock<pixel_t, N>* data, tmp_t* pDst, int pitchX, int pitchsuperX, void *stream);
 
         int pitchX, pitchsuperX;
         if (blksize < 8) {
@@ -2952,14 +2962,14 @@ public:
         }
 
         // 4回カーネル呼び出し
-        (this->*degrain_func)(0, 0, nBlkX, nBlkY, degrainblocks, pTmp[p], pitchX, pitchsuperX);
-        (this->*degrain_func)(1, 0, nBlkX, nBlkY, degrainblocks, pTmp[p], pitchX, pitchsuperX);
-        (this->*degrain_func)(0, 1, nBlkX, nBlkY, degrainblocks, pTmp[p], pitchX, pitchsuperX);
-        (this->*degrain_func)(1, 1, nBlkX, nBlkY, degrainblocks, pTmp[p], pitchX, pitchsuperX);
+        (this->*degrain_func)(0, 0, nBlkX, nBlkY, degrainblocks, pTmp[p], pitchX, pitchsuperX, planeStream);
+        (this->*degrain_func)(1, 0, nBlkX, nBlkY, degrainblocks, pTmp[p], pitchX, pitchsuperX, planeStream);
+        (this->*degrain_func)(0, 1, nBlkX, nBlkY, degrainblocks, pTmp[p], pitchX, pitchsuperX, planeStream);
+        (this->*degrain_func)(1, 1, nBlkX, nBlkY, degrainblocks, pTmp[p], pitchX, pitchsuperX, planeStream);
 
         // tmp_t -> pixel_t 変換
         launch_short_to_byte<vpixel_t, vtmp_t>(
-          (vpixel_t*)pDst[p], (const vtmp_t*)pTmp[p], width_b4, height_b, pitch4, max_pixel_value);
+          (vpixel_t*)pDst[p], (const vtmp_t*)pTmp[p], width_b4, height_b, pitch4, max_pixel_value, planeStream);
 
 #if 0
         DataDebug<tmp_t> dtmp(pTmp[p], height_b * pitch, env);
@@ -2972,7 +2982,7 @@ public:
           launch_elementwise<vpixel_t, vpixel_t, CopyFunction<vpixel_t>>(
             (vpixel_t*)(pDst[p] + (nWidth_B >> shift)),
             (const vpixel_t*)(pSrc[p] + (nWidth_B >> shift)),
-            ((nWidth - nWidth_B) >> shift) / 4, nBlkY * blksize, pitch4, stream);
+            ((nWidth - nWidth_B) >> shift) / 4, nBlkY * blksize, pitch4, planeStream);
         }
 
         // bottom uncovered regionをsrcからコピー
@@ -2980,15 +2990,16 @@ public:
           launch_elementwise<vpixel_t, vpixel_t, CopyFunction<vpixel_t>>(
             (vpixel_t*)(pDst[p] + (nHeight_B >> shift) * pitch),
             (const vpixel_t*)(pSrc[p] + (nHeight_B >> shift) * pitch),
-            width4, (nHeight - nHeight_B) >> shift, pitch4, stream);
+            width4, (nHeight - nHeight_B) >> shift, pitch4, planeStream);
         }
       }
       else {
         // srcからコピー
         launch_elementwise<vpixel_t, vpixel_t, CopyFunction<vpixel_t>>(
-          (vpixel_t*)pDst[p], (const vpixel_t*)pSrc[p], width4, height, pitch4, stream);
+          (vpixel_t*)pDst[p], (const vpixel_t*)pSrc[p], width4, height, pitch4, planeStream);
       }
     }
+    planeEvent->finPlane();
   }
 
   void Degrain(
@@ -3001,7 +3012,7 @@ public:
     const pixel_t** pSrc, pixel_t** pDst, tmp_t** pTmp, const pixel_t** pRefB, const pixel_t** pRefF,
     int nPitchY, int nPitchUV,
     int nPitchSuperY, int nPitchSuperUV, int nImgPitchY, int nImgPitchUV,
-    void* _degrainblock, void* _degrainarg, int* sceneChange)
+    void* _degrainblock, void* _degrainarg, int* sceneChange, IMVCUDA *cuda)
   {
     int numRef = N * 2;
     int numBlks = nBlkX * nBlkY;
@@ -3053,7 +3064,7 @@ public:
       ovrwins, overwinsUV, mvB, mvF,
       pSrc, pDst, pTmp, pRefB, pRefF,
       nPitchY, nPitchUV, nPitchSuperY, nPitchSuperUV, nImgPitchY, nImgPitchUV,
-      _degrainblock, _degrainarg, sceneChangeB, sceneChangeF);
+      _degrainblock, _degrainarg, sceneChangeB, sceneChangeF, cuda);
   }
 
   int GetCompensateStructSize() {
@@ -3270,23 +3281,184 @@ public:
 // IKDeintCUDAImpl
 /////////////////////////////////////////////////////////////////////////////
 
+cudaEventPlanes::cudaEventPlanes() : start(nullptr), endY(nullptr), endU(nullptr), endV(nullptr), streamMain(nullptr), streamY(nullptr), streamU(nullptr), streamV(nullptr) {}
+cudaEventPlanes::~cudaEventPlanes() {
+    if (start) cudaEventDestroy(start);
+    if (endY) cudaEventDestroy(endY);
+    if (endU) cudaEventDestroy(endU);
+    if (endV) cudaEventDestroy(endV);
+}
+void cudaEventPlanes::init() {
+    if (!start) cudaEventCreate(&start);
+    if (!endY) cudaEventCreate(&endY);
+    if (!endU) cudaEventCreate(&endU);
+    if (!endV) cudaEventCreate(&endV);
+}
+void cudaEventPlanes::startPlane(cudaStream_t sMain, cudaStream_t sY, cudaStream_t sU, cudaStream_t sV) {
+    streamMain = sMain;
+    streamY = sY;
+    streamU = sU;
+    streamV = sV;
+    cudaEventRecord(start, sMain);
+    if (sY) {
+        cudaStreamWaitEvent(sY, start);
+    }
+    if (sU) {
+        cudaStreamWaitEvent(sU, start);
+    }
+    if (sV) {
+        cudaStreamWaitEvent(sV, start);
+    }
+}
+void cudaEventPlanes::finPlane() {
+    if (streamY) cudaEventRecord(endY, streamY);
+    if (streamU) cudaEventRecord(endU, streamU);
+    if (streamV) cudaEventRecord(endV, streamV);
+    if (streamY || streamU || streamV) {
+        if (streamY) cudaStreamWaitEvent(streamMain, endY);
+        if (streamU) cudaStreamWaitEvent(streamMain, endU);
+        if (streamV) cudaStreamWaitEvent(streamMain, endV);
+    }
+}
+bool cudaEventPlanes::planeYFin() {
+    return cudaEventQuery(endY) == cudaSuccess;
+}
+bool cudaEventPlanes::planeUFin() {
+    return cudaEventQuery(endU) == cudaSuccess;
+}
+bool cudaEventPlanes::planeVFin() {
+    return cudaEventQuery(endV) == cudaSuccess;
+}
+
+class CudaPlaneEventsPool {
+protected:
+    std::deque<std::unique_ptr<cudaEventPlanes>> events;
+public:
+    CudaPlaneEventsPool() : events() {}
+    ~CudaPlaneEventsPool() { }
+
+    cudaEventPlanes *PlaneStreamStart(cudaStream_t sMain, cudaStream_t sY, cudaStream_t sU, cudaStream_t sV) {
+        cudaEventPlanes *ptr = nullptr;
+        // events の中身を先頭から見て、cudaEventQueryでcudaSuccessを返るものがあれば、それを末尾に移動する
+        auto it = events.begin();
+        if (it != events.end()) {
+            if ((*it)->planeYFin() && (*it)->planeUFin() && (*it)->planeVFin()) {
+                auto e = std::move(*it);
+                events.erase(it);
+                events.push_back(std::move(e));
+                ptr = events.back().get();
+            }
+        }
+        if (!ptr) {
+            events.push_back(std::make_unique<cudaEventPlanes>());
+            ptr = events.back().get();
+            ptr->init();
+        }
+        ptr->startPlane(sMain, sY, sU, sV);
+        return ptr;
+    }
+};
+
+class cudaPlaneStreams {
+    cudaStream_t stream;
+    cudaStream_t streamY;
+    cudaStream_t streamU;
+    cudaStream_t streamV;
+    CudaPlaneEventsPool eventPool;
+public:
+    cudaPlaneStreams() : stream(nullptr), streamY(nullptr), streamU(nullptr), streamV(nullptr), eventPool() {}
+    ~cudaPlaneStreams() {
+        if (streamY) {
+            cudaStreamDestroy(streamY);
+            streamY = nullptr;
+        }
+        if (streamU) {
+            cudaStreamDestroy(streamU);
+            streamU = nullptr;
+        }
+        if (streamV) {
+            cudaStreamDestroy(streamV);
+            streamV = nullptr;
+        }
+    }
+    void initStream(cudaStream_t stream_) {
+        stream = stream_;
+        if (!streamY) {
+            cudaStreamCreateWithFlags(&streamY, cudaStreamNonBlocking);
+        }
+        if (!streamU) {
+            cudaStreamCreateWithFlags(&streamU, cudaStreamNonBlocking);
+        }
+        if (!streamV) {
+            cudaStreamCreateWithFlags(&streamV, cudaStreamNonBlocking);
+        }
+    }
+    virtual cudaEventPlanes *CreateEventPlanes() {
+        return eventPool.PlaneStreamStart(stream, streamY, streamU, streamV);
+    }
+    virtual void *GetDeviceStreamY() {
+        return streamY;
+    }
+    virtual void *GetDeviceStreamU() {
+        return streamU;
+    }
+    virtual void *GetDeviceStreamV() {
+        return streamV;
+    }
+};
+
 class IMVCUDAImpl : public IMVCUDA
 {
-  KDeintKernel<uint8_t> k8;
-  KDeintKernel<uint16_t> k16;
-
+    KDeintKernel<uint8_t> k8;
+    KDeintKernel<uint16_t> k16;
+    cudaStream_t stream;
+    std::unique_ptr<cudaPlaneStreams> planeStreams;
 public:
-  virtual void SetEnv(PNeoEnv env) {
-    k8.SetEnv(env);
-    k16.SetEnv(env);
-  }
+    IMVCUDAImpl() : k8(), k16(), planeStreams() {
+    }
+    virtual ~IMVCUDAImpl() {
+        planeStreams.reset();
+    }
+    virtual void SetEnv(PNeoEnv env) override {
+        stream = (cudaStream_t)env->GetDeviceStream();
+        k8.SetEnv(env);
+        k16.SetEnv(env);
+    }
+    virtual cudaEventPlanes *CreateEventPlanes() {
+        if (IsEnabled()) {
+            if (!planeStreams) {
+                planeStreams = std::make_unique<cudaPlaneStreams>();
+                planeStreams->initStream(stream);
+            }
+            return planeStreams->CreateEventPlanes();
+        }
+        return nullptr;
+    }
 
-  virtual bool IsEnabled() const {
-    return k8.IsEnabled();
-  }
+    virtual bool IsEnabled() const override {
+        return k8.IsEnabled();
+    }
+    virtual void *GetDeviceStreamY() override {
+        return planeStreams->GetDeviceStreamY();
+    }
+    virtual void *GetDeviceStreamU() override {
+        return planeStreams->GetDeviceStreamU();
+    }
+    virtual void *GetDeviceStreamV() override {
+        return planeStreams->GetDeviceStreamV();
+    }
+    virtual void *GetDeviceStreamPlane(int idx) override {
+        switch (idx) {
+        case 1: return planeStreams->GetDeviceStreamU();
+        case 2: return planeStreams->GetDeviceStreamV();
+        case 0:
+        default: return planeStreams->GetDeviceStreamY();
+        }
+        return nullptr;
+    }
 
-  virtual IKDeintKernel<uint8_t>* get(uint8_t) { return &k8; }
-  virtual IKDeintKernel<uint16_t>* get(uint16_t) { return &k16; }
+    virtual IKDeintKernel<uint8_t>* get(uint8_t) { return &k8; }
+    virtual IKDeintKernel<uint16_t>* get(uint16_t) { return &k16; }
 };
 
 IMVCUDA* CreateKDeintCUDA()

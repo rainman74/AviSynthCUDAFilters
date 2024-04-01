@@ -11,6 +11,8 @@ enum {
   ANALYZE_MAX_BATCH = 8
 };
 
+class IMVCUDA;
+
 template <typename pixel_t>
 class IKDeintKernel
 {
@@ -23,17 +25,17 @@ public:
   virtual void Copy(pixel_t* dst, int dst_pitch, const pixel_t* src, int src_pitch, int width, int height) = 0;
   virtual void PadFrame(pixel_t *refFrame, int refPitch, int hPad, int vPad, int width, int height) = 0;
   virtual void CopyPad(
-      pixel_t* dst, int dst_pitch, const pixel_t* src, int src_pitch, int hPad, int vPad, int width, int height) = 0;
+      pixel_t* dst, int dst_pitch, const pixel_t* src, int src_pitch, int hPad, int vPad, int width, int height, void *stream_) = 0;
   virtual void VerticalWiener(
     pixel_t *pDst, const pixel_t *pSrc, int nDstPitch,
-    int nSrcPitch, int nWidth, int nHeight, int bits_per_pixel) = 0;
+    int nSrcPitch, int nWidth, int nHeight, int bits_per_pixel, void *stream_) = 0;
   virtual void HorizontalWiener(
     pixel_t *pDst, const pixel_t *pSrc, int nDstPitch,
-    int nSrcPitch, int nWidth, int nHeight, int bits_per_pixel) = 0;
+    int nSrcPitch, int nWidth, int nHeight, int bits_per_pixel, void *stream_) = 0;
   virtual void RB2BilinearFiltered(
     pixel_t *pDst, const pixel_t *pSrc, int nDstPitch, int nSrcPitch, int nWidth, int nHeight) = 0;
   virtual void RB2BilinearFilteredPad(
-      pixel_t *pDst, const pixel_t *pSrc, int nDstPitch, int nSrcPitch, int hPad, int vPad, int nWidth, int nHeight) = 0;
+      pixel_t *pDst, const pixel_t *pSrc, int nDstPitch, int nSrcPitch, int hPad, int vPad, int nWidth, int nHeight, void *stream_) = 0;
 
   // Analyze //
   virtual int GetSearchBlockSize() = 0;
@@ -76,7 +78,7 @@ public:
     const pixel_t** pSrc, pixel_t** pDst, tmp_t** pTmp, const pixel_t** pRefB, const pixel_t** pRefF,
     int nPitchY, int nPitchUV,
     int nPitchSuperY, int nPitchSuperUV, int nImgPitchY, int nImgPitchUV,
-    void* _degrainblock, void* _degrainarg, int* sceneChange) = 0;
+    void* _degrainblock, void* _degrainarg, int* sceneChange, IMVCUDA *cuda) = 0;
 
   // Compensate //
   virtual int GetCompensateStructSize() = 0;
@@ -92,6 +94,27 @@ public:
     void* _compensateblock, int* sceneChange) = 0;
 };
 
+class cudaEventPlanes {
+protected:
+    cudaEvent_t start;
+    cudaEvent_t endY;
+    cudaEvent_t endU;
+    cudaEvent_t endV;
+    cudaStream_t streamMain;
+    cudaStream_t streamY;
+    cudaStream_t streamU;
+    cudaStream_t streamV;
+public:
+    cudaEventPlanes();
+    ~cudaEventPlanes();
+    void init();
+    void startPlane(cudaStream_t sMain, cudaStream_t sY, cudaStream_t sU, cudaStream_t sV);
+    void finPlane();
+    bool planeYFin();
+    bool planeUFin();
+    bool planeVFin();
+};
+
 class IMVCUDA
 {
 public:
@@ -99,6 +122,11 @@ public:
   virtual bool IsEnabled() const = 0;
   virtual IKDeintKernel<uint8_t>* get(uint8_t) = 0;
   virtual IKDeintKernel<uint16_t>* get(uint16_t) = 0;
+  virtual cudaEventPlanes *CreateEventPlanes() = 0;
+  virtual void *GetDeviceStreamY() = 0;
+  virtual void *GetDeviceStreamU() = 0;
+  virtual void *GetDeviceStreamV() = 0;
+  virtual void *GetDeviceStreamPlane(int idx) = 0;
 };
 
 IMVCUDA* CreateKDeintCUDA();
