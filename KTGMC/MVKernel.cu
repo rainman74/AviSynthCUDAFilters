@@ -1438,7 +1438,11 @@ __global__ void kl_mean_global_mv(const short2* vectors, int vectorsPitch, int n
   meanvy = red_vy[tid];
   num = red_num[tid];
   if (tid < 32) {
-#if CUDART_VERSION >= 9000
+#if __CUDA_ARCH__ >= 800
+    meanvx = __reduce_add_sync(0xffffffff, meanvx);
+    meanvy = __reduce_add_sync(0xffffffff, meanvy);
+    num = __reduce_add_sync(0xffffffff, num);
+#elif CUDART_VERSION >= 9000
     meanvx += __shfl_down_sync(0xffffffff, meanvx, 16);
     meanvy += __shfl_down_sync(0xffffffff, meanvy, 16);
     num += __shfl_down_sync(0xffffffff, num, 16);
