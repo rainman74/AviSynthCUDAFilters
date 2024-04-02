@@ -53,28 +53,3 @@ public:
     void *GetDeviceStreamDefault();
     void *GetDeviceStreamPlane(int idx);
 };
-
-class cudaHostBatchParam {
-protected:
-    void *ptr;
-    size_t size;
-    cudaEvent_t event;
-public:
-    void alloc(size_t size);
-    size_t getSize() const { return size; }
-    void *getPtr() { return ptr; }
-    cudaHostBatchParam();
-    ~cudaHostBatchParam();
-    void recordEvent(cudaStream_t stream);
-    bool hasFinished();
-};
-
-class cudaHostBatchParams {
-protected:
-    std::deque<std::unique_ptr<cudaHostBatchParam>> params;
-public:
-    cudaHostBatchParams();
-    ~cudaHostBatchParams();
-
-    cudaHostBatchParam *getNewParam(size_t size);
-};

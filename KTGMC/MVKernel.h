@@ -50,13 +50,13 @@ public:
     int normFactor, int normov, int atotal, int aodd, int aeven) = 0;
   virtual void LoadMV(const VECTOR* in, short2* vectors, int* sads, int nBlkCount) = 0;
   virtual void StoreMV(VECTOR* out, const short2* vectors, const int* sads, int nBlkCount) = 0;
-  virtual void LoadMVBatch(void* _loadmvbatch, cudaHostBatchParam* _hloadmvbatch, int batch,
+  virtual void LoadMVBatch(void* _loadmvbatch, int batch,
       const VECTOR** in, VECTOR** out, short2* vectors, int vectorsPitch, int* sads, int sadPitch, int nBlkCount) = 0;
   virtual void WriteDefaultMV(VECTOR* dst, int nBlkCount, int verybigSAD) = 0;
 
   // 36 args
   virtual void Search(
-    int batch, VECTOR **out, void* _searchbatch, cudaHostBatchParam* _hsearchbatch,
+    int batch, VECTOR **out, void* _searchbatch,
     int searchType, int nBlkX, int nBlkY, int nBlkSize, int nLogScale,
     int nLambdaLevel, int lsad, int penaltyZero, int penaltyGlobal, int penaltyNew,
     int nPel, bool chroma, int nPad, int nBlkSizeOvr, int nExtendedWidth, int nExptendedHeight,
@@ -78,7 +78,7 @@ public:
     const pixel_t** pSrc, pixel_t** pDst, tmp_t** pTmp, const pixel_t** pRefB, const pixel_t** pRefF,
     int nPitchY, int nPitchUV,
     int nPitchSuperY, int nPitchSuperUV, int nImgPitchY, int nImgPitchUV,
-    void** _degrainblock, void* _degrainarg, cudaHostBatchParam* _hdegrainarg, int* sceneChange, IMVCUDA *cuda) = 0;
+    void** _degrainblock, void* _degrainarg, int* sceneChange, IMVCUDA *cuda) = 0;
 
   // Compensate //
   virtual int GetCompensateStructSize() = 0;

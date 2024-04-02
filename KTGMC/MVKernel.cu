@@ -2506,7 +2506,7 @@ public:
   }
 
   void Search(
-    int batch, VECTOR **out, void* _searchbatch, cudaHostBatchParam* _hsearchbatch,
+    int batch, VECTOR **out, void* _searchbatch,
     int searchType, int nBlkX, int nBlkY, int nBlkSize, int nLogScale,
     int nLambdaLevel, int lsad, int penaltyZero, int penaltyGlobal, int penaltyNew,
     int nPel, bool chroma, int nPad, int nBlkSizeOvr, int nExtendedWidth, int nExptendedHeight,
@@ -2519,7 +2519,7 @@ public:
 
     SearchBlock* searchblocks = (SearchBlock*)_searchblocks;
     SearchBatchData<pixel_t>* searchbatch = (SearchBatchData<pixel_t>*)_searchbatch;
-    SearchBatchData<pixel_t>* hsearchbatch = (SearchBatchData<pixel_t>*)_hsearchbatch->getPtr();
+    SearchBatchData<pixel_t>* hsearchbatch = new SearchBatchData<pixel_t>[ANALYZE_MAX_BATCH];
 
     {
       // set zeroMV and globalMV
@@ -2599,11 +2599,11 @@ public:
       }
 
       CUDA_CHECK(cudaMemcpyAsync(searchbatch, hsearchbatch, sizeof(searchbatch[0]) * batch, cudaMemcpyHostToDevice, stream));
-      _hsearchbatch->recordEvent(stream);
+
       // 終わったら解放するコールバックを追加
-      //env->DeviceAddCallback([](void* arg) {
-      //  delete[]((SearchBatchData<pixel_t>*)arg);
-      //}, hsearchbatch);
+      env->DeviceAddCallback([](void* arg) {
+        delete[]((SearchBatchData<pixel_t>*)arg);
+      }, hsearchbatch);
 
       auto analyzef = table[(searchType == 8) ? 0 : 1][fidx];
       if (analyzef == NULL) {
@@ -2681,13 +2681,13 @@ public:
     DEBUG_SYNC;
   }
 
-  void LoadMVBatch(void* _loadmvbatch, cudaHostBatchParam* _hloadmvbatch, int batch,
+  void LoadMVBatch(void* _loadmvbatch, int batch,
       const VECTOR** src, VECTOR** out, short2* vectors, int vectorsPitch, int* sads, int sadPitch, int nBlkCount)
   {
       const int threadcount = 256;
       static_assert(LoadMVBatchData<pixel_t>::LEN <= threadcount);
       LoadMVBatchData<pixel_t>* loadmvbatch = (LoadMVBatchData<pixel_t>*)_loadmvbatch;
-      LoadMVBatchData<pixel_t>* hloadmvbatch = (LoadMVBatchData<pixel_t>*)_hloadmvbatch->getPtr();
+      LoadMVBatchData<pixel_t>* hloadmvbatch = new LoadMVBatchData<pixel_t>[batch];
 
       // パラメータを作る
       for (int i = 0; i < batch; i++) {
@@ -2699,7 +2699,10 @@ public:
 
       CUDA_CHECK(cudaMemcpyAsync(loadmvbatch, hloadmvbatch, sizeof(loadmvbatch[0]) * batch, cudaMemcpyHostToDevice, stream));
 
-      _hloadmvbatch->recordEvent(stream);
+      //終わったら解放するコールバックを追加
+      env->DeviceAddCallback([](void* arg) {
+          delete[]((LoadMVBatchData<pixel_t>*)arg);
+          }, hloadmvbatch);
 
       dim3 threads(threadcount);
       dim3 blocks(nblocks(nBlkCount, threads.x), batch);
@@ -2811,7 +2814,7 @@ public:
     const VECTOR** mvB, const VECTOR** mvF,
     const pixel_t** pSrc, pixel_t** pDst, tmp_t** pTmp, const pixel_t** pRefB, const pixel_t** pRefF,
     int nPitch, int nPitchUV, int nPitchSuperY, int nPitchSuperUV, int nImgPitch, int nImgPitchUV,
-    void** _degrainblocks, void* _degraindarg, cudaHostBatchParam* _hdegrainarg, int *sceneChangeB, int *sceneChangeF, IMVCUDA *cuda
+    void** _degrainblocks, void* _degraindarg, int *sceneChangeB, int *sceneChangeF, IMVCUDA *cuda
     );
 
   // pTmpはpSrcと同じpitchであること
@@ -2825,7 +2828,7 @@ public:
     const VECTOR** mvB, const VECTOR** mvF,
     const pixel_t** pSrc, pixel_t** pDst, tmp_t** pTmp, const pixel_t** pRefB, const pixel_t** pRefF,
     int nPitchY, int nPitchUV, int nPitchSuperY, int nPitchSuperUV, int nImgPitchY, int nImgPitchUV,
-    void** _degrainblocks, void* _degraindarg, cudaHostBatchParam* _hdegrainarg, int *sceneChangeB, int *sceneChangeF, IMVCUDA *cuda
+    void** _degrainblocks, void* _degraindarg, int *sceneChangeB, int *sceneChangeF, IMVCUDA *cuda
   )
   {
 
@@ -2834,8 +2837,7 @@ public:
     int nHeight_B = nBlkY*(nBlkSize - nOverlap) + nOverlap;
 
     // degrainarg作成
-    DegrainArg<pixel_t, N> *hargs = (DegrainArg<pixel_t, N> *)_hdegrainarg->getPtr();
-    //DegrainArg<pixel_t, N> *hargs = new DegrainArg<pixel_t, N>[3];
+    DegrainArg<pixel_t, N> *hargs = new DegrainArg<pixel_t, N>[3];
     DegrainArg<pixel_t, N> *dargs = (DegrainArg<pixel_t, N>*)_degraindarg;
 
     for (int p = 0; p < 3; ++p) {
@@ -2858,12 +2860,11 @@ public:
     }
 
     CUDA_CHECK(cudaMemcpyAsync(dargs, hargs, sizeof(hargs[0]) * 3, cudaMemcpyHostToDevice, stream));
-    _hdegrainarg->recordEvent(stream);
 
-    // 終わったら解放するコールバックを追加
-    //env->DeviceAddCallback([](void* arg) {
-    //  delete[]((DegrainArg<pixel_t, N>*)arg);
-    //}, hargs);
+    //終わったら解放するコールバックを追加
+    env->DeviceAddCallback([](void* arg) {
+      delete[]((DegrainArg<pixel_t, N>*)arg);
+    }, hargs);
 
     typedef void (Me::*PREPARE)(
       int nBlkX, int nBlkY, int nPad, int nBlkSize, int nTh2, int thSAD,
@@ -3020,7 +3021,7 @@ public:
     const pixel_t** pSrc, pixel_t** pDst, tmp_t** pTmp, const pixel_t** pRefB, const pixel_t** pRefF,
     int nPitchY, int nPitchUV,
     int nPitchSuperY, int nPitchSuperUV, int nImgPitchY, int nImgPitchUV,
-    void** _degrainblock, void* _degrainarg, cudaHostBatchParam* _hdegrainarg, int* sceneChange, IMVCUDA *cuda)
+    void** _degrainblock, void* _degrainarg, int* sceneChange, IMVCUDA *cuda)
   {
     int numRef = N * 2;
     int numBlks = nBlkX * nBlkY;
@@ -3072,7 +3073,7 @@ public:
       ovrwins, overwinsUV, mvB, mvF,
       pSrc, pDst, pTmp, pRefB, pRefF,
       nPitchY, nPitchUV, nPitchSuperY, nPitchSuperUV, nImgPitchY, nImgPitchUV,
-      _degrainblock, _degrainarg, _hdegrainarg, sceneChangeB, sceneChangeF, cuda);
+      _degrainblock, _degrainarg, sceneChangeB, sceneChangeF, cuda);
   }
 
   int GetCompensateStructSize() {
@@ -3296,61 +3297,6 @@ public:
 /////////////////////////////////////////////////////////////////////////////
 // IKDeintCUDAImpl
 /////////////////////////////////////////////////////////////////////////////
-cudaHostBatchParam::cudaHostBatchParam() : ptr(nullptr), size(0), event(nullptr) {
-    cudaEventCreate(&event);
-}
-cudaHostBatchParam::~cudaHostBatchParam() {
-    if (ptr) {
-        cudaFreeHost(ptr);
-        ptr = nullptr;
-    }
-    size = 0;
-    if (event) {
-        cudaEventDestroy(event);
-        event = nullptr;
-    }
-}
-
-void cudaHostBatchParam::alloc(size_t size) {
-    if (ptr) {
-        cudaFreeHost(ptr);
-        ptr = nullptr;
-    }
-    this->size = size;
-    cudaHostAlloc(&ptr, size, cudaHostAllocDefault);
-}
-
-bool cudaHostBatchParam::hasFinished() {
-    return cudaEventQuery(event) == cudaSuccess;
-}
-void cudaHostBatchParam::recordEvent(cudaStream_t stream) {
-    cudaEventRecord(event, stream);
-}
-
-cudaHostBatchParams::cudaHostBatchParams() : params() {}
-cudaHostBatchParams::~cudaHostBatchParams() {
-    params.clear();
-}
-
-cudaHostBatchParam *cudaHostBatchParams::getNewParam(size_t size) {
-    cudaHostBatchParam *ptr = nullptr;
-    auto it = params.begin();
-    if (it != params.end() && (*it)->hasFinished()) {
-        auto ret = std::move(*it);
-        params.erase(it);
-        params.push_back(std::move(ret));
-        ptr = params.back().get();
-    }
-    if (!ptr) {
-        params.push_back(std::make_unique<cudaHostBatchParam>());
-        ptr = params.back().get();
-    }
-    if (ptr->getSize() != size) {
-        ptr->alloc(size);
-    }
-    return ptr;
-}
-
 cudaEventPlanes::cudaEventPlanes() : start(nullptr), endY(nullptr), endU(nullptr), endV(nullptr), streamMain(nullptr), streamY(nullptr), streamU(nullptr), streamV(nullptr) {}
 cudaEventPlanes::~cudaEventPlanes() {
     if (start) cudaEventDestroy(start);
