@@ -2506,7 +2506,7 @@ public:
   }
 
   void Search(
-    int batch, VECTOR **out, void* _searchbatch, void* _hsearchbatch,
+    int batch, VECTOR **out, void* _searchbatch, cudaHostBatchParam* _hsearchbatch,
     int searchType, int nBlkX, int nBlkY, int nBlkSize, int nLogScale,
     int nLambdaLevel, int lsad, int penaltyZero, int penaltyGlobal, int penaltyNew,
     int nPel, bool chroma, int nPad, int nBlkSizeOvr, int nExtendedWidth, int nExptendedHeight,
@@ -2519,7 +2519,7 @@ public:
 
     SearchBlock* searchblocks = (SearchBlock*)_searchblocks;
     SearchBatchData<pixel_t>* searchbatch = (SearchBatchData<pixel_t>*)_searchbatch;
-    SearchBatchData<pixel_t>* hsearchbatch = (SearchBatchData<pixel_t>*)_hsearchbatch;
+    SearchBatchData<pixel_t>* hsearchbatch = (SearchBatchData<pixel_t>*)_hsearchbatch->getPtr();
 
     {
       // set zeroMV and globalMV
@@ -2599,7 +2599,7 @@ public:
       }
 
       CUDA_CHECK(cudaMemcpyAsync(searchbatch, hsearchbatch, sizeof(searchbatch[0]) * batch, cudaMemcpyHostToDevice, stream));
-
+      _hsearchbatch->recordEvent(stream);
       // 終わったら解放するコールバックを追加
       //env->DeviceAddCallback([](void* arg) {
       //  delete[]((SearchBatchData<pixel_t>*)arg);
@@ -2681,13 +2681,13 @@ public:
     DEBUG_SYNC;
   }
 
-  void LoadMVBatch(void* _loadmvbatch, void* _hloadmvbatch, int batch,
+  void LoadMVBatch(void* _loadmvbatch, cudaHostBatchParam* _hloadmvbatch, int batch,
       const VECTOR** src, VECTOR** out, short2* vectors, int vectorsPitch, int* sads, int sadPitch, int nBlkCount)
   {
       const int threadcount = 256;
       static_assert(LoadMVBatchData<pixel_t>::LEN <= threadcount);
       LoadMVBatchData<pixel_t>* loadmvbatch = (LoadMVBatchData<pixel_t>*)_loadmvbatch;
-      LoadMVBatchData<pixel_t>* hloadmvbatch = (LoadMVBatchData<pixel_t>*)_hloadmvbatch;
+      LoadMVBatchData<pixel_t>* hloadmvbatch = (LoadMVBatchData<pixel_t>*)_hloadmvbatch->getPtr();
 
       // パラメータを作る
       for (int i = 0; i < batch; i++) {
@@ -2698,6 +2698,8 @@ public:
       }
 
       CUDA_CHECK(cudaMemcpyAsync(loadmvbatch, hloadmvbatch, sizeof(loadmvbatch[0]) * batch, cudaMemcpyHostToDevice, stream));
+
+      _hloadmvbatch->recordEvent(stream);
 
       dim3 threads(threadcount);
       dim3 blocks(nblocks(nBlkCount, threads.x), batch);
@@ -2809,7 +2811,7 @@ public:
     const VECTOR** mvB, const VECTOR** mvF,
     const pixel_t** pSrc, pixel_t** pDst, tmp_t** pTmp, const pixel_t** pRefB, const pixel_t** pRefF,
     int nPitch, int nPitchUV, int nPitchSuperY, int nPitchSuperUV, int nImgPitch, int nImgPitchUV,
-    void** _degrainblocks, void* _degraindarg, int *sceneChangeB, int *sceneChangeF, IMVCUDA *cuda
+    void** _degrainblocks, void* _degraindarg, cudaHostBatchParam* _hdegrainarg, int *sceneChangeB, int *sceneChangeF, IMVCUDA *cuda
     );
 
   // pTmpはpSrcと同じpitchであること
@@ -2823,7 +2825,7 @@ public:
     const VECTOR** mvB, const VECTOR** mvF,
     const pixel_t** pSrc, pixel_t** pDst, tmp_t** pTmp, const pixel_t** pRefB, const pixel_t** pRefF,
     int nPitchY, int nPitchUV, int nPitchSuperY, int nPitchSuperUV, int nImgPitchY, int nImgPitchUV,
-    void** _degrainblocks, void* _degraindarg, int *sceneChangeB, int *sceneChangeF, IMVCUDA *cuda
+    void** _degrainblocks, void* _degraindarg, cudaHostBatchParam* _hdegrainarg, int *sceneChangeB, int *sceneChangeF, IMVCUDA *cuda
   )
   {
 
@@ -2832,7 +2834,8 @@ public:
     int nHeight_B = nBlkY*(nBlkSize - nOverlap) + nOverlap;
 
     // degrainarg作成
-    DegrainArg<pixel_t, N> *hargs = new DegrainArg<pixel_t, N>[3];
+    DegrainArg<pixel_t, N> *hargs = (DegrainArg<pixel_t, N> *)_hdegrainarg->getPtr();
+    //DegrainArg<pixel_t, N> *hargs = new DegrainArg<pixel_t, N>[3];
     DegrainArg<pixel_t, N> *dargs = (DegrainArg<pixel_t, N>*)_degraindarg;
 
     for (int p = 0; p < 3; ++p) {
@@ -2855,11 +2858,12 @@ public:
     }
 
     CUDA_CHECK(cudaMemcpyAsync(dargs, hargs, sizeof(hargs[0]) * 3, cudaMemcpyHostToDevice, stream));
+    _hdegrainarg->recordEvent(stream);
 
     // 終わったら解放するコールバックを追加
-    env->DeviceAddCallback([](void* arg) {
-      delete[]((DegrainArg<pixel_t, N>*)arg);
-    }, hargs);
+    //env->DeviceAddCallback([](void* arg) {
+    //  delete[]((DegrainArg<pixel_t, N>*)arg);
+    //}, hargs);
 
     typedef void (Me::*PREPARE)(
       int nBlkX, int nBlkY, int nPad, int nBlkSize, int nTh2, int thSAD,
@@ -3016,7 +3020,7 @@ public:
     const pixel_t** pSrc, pixel_t** pDst, tmp_t** pTmp, const pixel_t** pRefB, const pixel_t** pRefF,
     int nPitchY, int nPitchUV,
     int nPitchSuperY, int nPitchSuperUV, int nImgPitchY, int nImgPitchUV,
-    void** _degrainblock, void* _degrainarg, int* sceneChange, IMVCUDA *cuda)
+    void** _degrainblock, void* _degrainarg, cudaHostBatchParam* _hdegrainarg, int* sceneChange, IMVCUDA *cuda)
   {
     int numRef = N * 2;
     int numBlks = nBlkX * nBlkY;
@@ -3068,7 +3072,7 @@ public:
       ovrwins, overwinsUV, mvB, mvF,
       pSrc, pDst, pTmp, pRefB, pRefF,
       nPitchY, nPitchUV, nPitchSuperY, nPitchSuperUV, nImgPitchY, nImgPitchUV,
-      _degrainblock, _degrainarg, sceneChangeB, sceneChangeF, cuda);
+      _degrainblock, _degrainarg, _hdegrainarg, sceneChangeB, sceneChangeF, cuda);
   }
 
   int GetCompensateStructSize() {
@@ -3084,11 +3088,12 @@ public:
     const pixel_t *pRef0,
     const pixel_t *pRef,
     CompensateBlock<pixel_t>* pblocks,
-    int nPitchSuper, int nImgPitch)
+    int nPitchSuper, int nImgPitch, void *stream_)
   {
+    cudaStream_t st = (stream_) ? (cudaStream_t)stream_ : stream;
     dim3 threads(32, 8);
     dim3 blocks(nblocks(nBlkX, threads.x), nblocks(nBlkY, threads.y));
-    kl_prepare_compensate<pixel_t, NPEL, SHIFT> << <blocks, threads, 0, stream >> > (
+    kl_prepare_compensate<pixel_t, NPEL, SHIFT> << <blocks, threads, 0, st >> > (
       nBlkX, nBlkY, nPad, nBlkSize, nTh2, time256, thSAD, ovrwins, sceneChange,
       mv, pRef0, pRef, pblocks, nPitchSuper, nImgPitch);
     DEBUG_SYNC;
@@ -3097,11 +3102,12 @@ public:
   template <int BLK_SIZE, int M>
   void launch_compensate_2x3_small(
     int nPatternX, int nPatternY,
-    int nBlkX, int nBlkY, CompensateBlock<pixel_t>* data, tmp_t* pDst, int pitch, int pitchsuper)
+    int nBlkX, int nBlkY, CompensateBlock<pixel_t>* data, tmp_t* pDst, int pitch, int pitchsuper, void *stream_)
   {
+    cudaStream_t st = (stream_) ? (cudaStream_t)stream_ : stream;
     dim3 threads(BLK_SIZE, BLK_SIZE, M);
     dim3 blocks(nblocks(nBlkX, 3 * 2 * M), nblocks(nBlkY, 2 * 2));
-    kl_compensate_2x3<pixel_t, tmp_t, int, short, BLK_SIZE, M> << <blocks, threads, 0, stream >> > (
+    kl_compensate_2x3<pixel_t, tmp_t, int, short, BLK_SIZE, M> << <blocks, threads, 0, st >> > (
       nPatternX, nPatternY, nBlkX, nBlkY, data, pDst, pitch, pitchsuper);
     DEBUG_SYNC;
   }
@@ -3109,22 +3115,24 @@ public:
   template <int BLK_SIZE, int M>
   void launch_compensate_2x3(
     int nPatternX, int nPatternY,
-    int nBlkX, int nBlkY, CompensateBlock<pixel_t>* data, tmp_t* pDst, int pitch4, int pitchsuper4)
+    int nBlkX, int nBlkY, CompensateBlock<pixel_t>* data, tmp_t* pDst, int pitch4, int pitchsuper4, void *stream_)
   {
+    cudaStream_t st = (stream_) ? (cudaStream_t)stream_ : stream;
     dim3 threads(BLK_SIZE / 4, BLK_SIZE, M);
     dim3 blocks(nblocks(nBlkX, 3 * 2 * M), nblocks(nBlkY, 2 * 2));
-    kl_compensate_2x3<pixel_t, vtmp_t, int4, short4, BLK_SIZE, M> << <blocks, threads, 0, stream >> > (
+    kl_compensate_2x3<pixel_t, vtmp_t, int4, short4, BLK_SIZE, M> << <blocks, threads, 0, st >> > (
       nPatternX, nPatternY, nBlkX, nBlkY, data, (vtmp_t*)pDst, pitch4, pitchsuper4);
     DEBUG_SYNC;
   }
 
   void launch_short_to_byte_or_copy_src(
     const void** __restrict__ pflag,
-    vpixel_t* dst, const vpixel_t* src, const vtmp_t* tmp, int width4, int height, int pitch4, int max_pixel_value)
+    vpixel_t* dst, const vpixel_t* src, const vtmp_t* tmp, int width4, int height, int pitch4, int max_pixel_value, void *stream_)
   {
+    cudaStream_t st = (stream_) ? (cudaStream_t)stream_ : stream;
     dim3 threads(32, 16);
     dim3 blocks(nblocks(width4, threads.x), nblocks(height, threads.y));
-    kl_short_to_byte_or_copy_src<vpixel_t, vtmp_t> << <blocks, threads, 0, stream >> > (
+    kl_short_to_byte_or_copy_src<vpixel_t, vtmp_t> << <blocks, threads, 0, st >> > (
       pflag, dst, src, tmp, width4, height, pitch4, max_pixel_value);
     DEBUG_SYNC;
   }
@@ -3137,7 +3145,7 @@ public:
     const pixel_t** pSrc, pixel_t** pDst, tmp_t** pTmp, const pixel_t** pRef,
     int nPitchY, int nPitchUV,
     int nPitchSuperY, int nPitchSuperUV, int nImgPitchY, int nImgPitchUV,
-    void* _compensateblock, int* sceneChange)
+    void** _compensateblock, int* sceneChange, IMVCUDA *cuda)
   {
     int numBlks = nBlkX * nBlkY;
 
@@ -3163,7 +3171,7 @@ public:
       const pixel_t *pRef0,
       const pixel_t *pRef,
       CompensateBlock<pixel_t>* pblocks,
-      int nPitchSuper, int nImgPitch);
+      int nPitchSuper, int nImgPitch, void *stream);
 
     PREPARE prepare_func, prepareuv_func;
 
@@ -3180,12 +3188,15 @@ public:
       env->ThrowError("[Compensate] 未対応Pel");
     }
 
-    CompensateBlock<pixel_t>* compensateblocks = (CompensateBlock<pixel_t>*)_compensateblock;
+    CompensateBlock<pixel_t>** compensateblocks = (CompensateBlock<pixel_t>**)_compensateblock;
     const int max_pixel_value = (1 << nBitsPerPixel) - 1;
+
+    auto planeEvent = cuda->CreateEventPlanes();
 
     // YUVループ
     for (int p = 0; p < 3; ++p) {
 
+      const auto planeStream = (cudaStream_t)cuda->GetDeviceStreamPlane(p);
       PREPARE prepare = (p == 0) ? prepare_func : prepareuv_func;
       int shift = (p == 0) ? 0 : 1;
       int blksize = nBlkSize >> shift;
@@ -3206,16 +3217,16 @@ public:
         nBlkX, nBlkY, nPad >> shift, blksize, nTh2, time256, thSAD,
         (p == 0) ? ovrwins : overwinsUV,
         sceneChange, mv, pRef[0 + p], pRef[3 + p],
-        compensateblocks, pitchsuper, imgpitch);
+        compensateblocks[p], pitchsuper, imgpitch, planeStream);
 
       // pTmp初期化
       launch_elementwise<vtmp_t, SetZeroFunction<vtmp_t>>(
-        (vtmp_t*)pTmp[p], width_b4, height_b, pitch4, stream);
+        (vtmp_t*)pTmp[p], width_b4, height_b, pitch4, planeStream);
       DEBUG_SYNC;
 
       void(Me::*compensate_func)(
         int nPatternX, int nPatternY,
-        int nBlkX, int nBlkY, CompensateBlock<pixel_t>* data, tmp_t* pDst, int pitchX, int pitchsuperX);
+        int nBlkX, int nBlkY, CompensateBlock<pixel_t>* data, tmp_t* pDst, int pitchX, int pitchsuperX, void *stream);
 
       int pitchX, pitchsuperX;
       if (blksize < 8) {
@@ -3245,15 +3256,15 @@ public:
       }
 
       // 4回カーネル呼び出し
-      (this->*compensate_func)(0, 0, nBlkX, nBlkY, compensateblocks, pTmp[p], pitchX, pitchsuperX);
-      (this->*compensate_func)(1, 0, nBlkX, nBlkY, compensateblocks, pTmp[p], pitchX, pitchsuperX);
-      (this->*compensate_func)(0, 1, nBlkX, nBlkY, compensateblocks, pTmp[p], pitchX, pitchsuperX);
-      (this->*compensate_func)(1, 1, nBlkX, nBlkY, compensateblocks, pTmp[p], pitchX, pitchsuperX);
+      (this->*compensate_func)(0, 0, nBlkX, nBlkY, compensateblocks[p], pTmp[p], pitchX, pitchsuperX, planeStream);
+      (this->*compensate_func)(1, 0, nBlkX, nBlkY, compensateblocks[p], pTmp[p], pitchX, pitchsuperX, planeStream);
+      (this->*compensate_func)(0, 1, nBlkX, nBlkY, compensateblocks[p], pTmp[p], pitchX, pitchsuperX, planeStream);
+      (this->*compensate_func)(1, 1, nBlkX, nBlkY, compensateblocks[p], pTmp[p], pitchX, pitchsuperX, planeStream);
 
       // tmp_t -> pixel_t 変換
       launch_short_to_byte_or_copy_src(
-        (const void**)&compensateblocks[0].d.winOver,
-        (vpixel_t*)pDst[p], (const vpixel_t*)pSrc[p], (const vtmp_t*)pTmp[p], width_b4, height_b, pitch4, max_pixel_value);
+        (const void**)&compensateblocks[p][0].d.winOver,
+        (vpixel_t*)pDst[p], (const vpixel_t*)pSrc[p], (const vtmp_t*)pTmp[p], width_b4, height_b, pitch4, max_pixel_value, planeStream);
 
 #if 0
       DataDebug<tmp_t> dtmp(pTmp[p], height_b * pitch, env);
@@ -3266,7 +3277,7 @@ public:
         launch_elementwise<vpixel_t, vpixel_t, CopyFunction<vpixel_t>>(
           (vpixel_t*)(pDst[p] + (nWidth_B >> shift)),
           (const vpixel_t*)(pSrc[p] + (nWidth_B >> shift)),
-          ((nWidth - nWidth_B) >> shift) / 4, nBlkY * blksize, pitch4, stream);
+          ((nWidth - nWidth_B) >> shift) / 4, nBlkY * blksize, pitch4, planeStream);
       }
 
       // bottom uncovered regionをsrcからコピー
@@ -3274,9 +3285,10 @@ public:
         launch_elementwise<vpixel_t, vpixel_t, CopyFunction<vpixel_t>>(
           (vpixel_t*)(pDst[p] + (nHeight_B >> shift) * pitch),
           (const vpixel_t*)(pSrc[p] + (nHeight_B >> shift) * pitch),
-          width4, (nHeight - nHeight_B) >> shift, pitch4, stream);
+          width4, (nHeight - nHeight_B) >> shift, pitch4, planeStream);
       }
     }
+    planeEvent->finPlane();
   }
 
 };
@@ -3284,6 +3296,60 @@ public:
 /////////////////////////////////////////////////////////////////////////////
 // IKDeintCUDAImpl
 /////////////////////////////////////////////////////////////////////////////
+cudaHostBatchParam::cudaHostBatchParam() : ptr(nullptr), size(0), event(nullptr) {
+    cudaEventCreate(&event);
+}
+cudaHostBatchParam::~cudaHostBatchParam() {
+    if (ptr) {
+        cudaFreeHost(ptr);
+        ptr = nullptr;
+    }
+    size = 0;
+    if (event) {
+        cudaEventDestroy(event);
+        event = nullptr;
+    }
+}
+
+void cudaHostBatchParam::alloc(size_t size) {
+    if (ptr) {
+        cudaFreeHost(ptr);
+        ptr = nullptr;
+    }
+    this->size = size;
+    cudaHostAlloc(&ptr, size, cudaHostAllocDefault);
+}
+
+bool cudaHostBatchParam::hasFinished() {
+    return cudaEventQuery(event) == cudaSuccess;
+}
+void cudaHostBatchParam::recordEvent(cudaStream_t stream) {
+    cudaEventRecord(event, stream);
+}
+
+cudaHostBatchParams::cudaHostBatchParams() : params() {}
+cudaHostBatchParams::~cudaHostBatchParams() {
+    params.clear();
+}
+
+cudaHostBatchParam *cudaHostBatchParams::getNewParam(size_t size) {
+    cudaHostBatchParam *ptr = nullptr;
+    auto it = params.begin();
+    if (it != params.end() && (*it)->hasFinished()) {
+        auto ret = std::move(*it);
+        params.erase(it);
+        params.push_back(std::move(ret));
+        ptr = params.back().get();
+    }
+    if (!ptr) {
+        params.push_back(std::make_unique<cudaHostBatchParam>());
+        ptr = params.back().get();
+    }
+    if (ptr->getSize() != size) {
+        ptr->alloc(size);
+    }
+    return ptr;
+}
 
 cudaEventPlanes::cudaEventPlanes() : start(nullptr), endY(nullptr), endU(nullptr), endV(nullptr), streamMain(nullptr), streamY(nullptr), streamU(nullptr), streamV(nullptr) {}
 cudaEventPlanes::~cudaEventPlanes() {
@@ -3334,82 +3400,77 @@ bool cudaEventPlanes::planeVFin() {
     return cudaEventQuery(endV) == cudaSuccess;
 }
 
-class CudaPlaneEventsPool {
-protected:
-    std::deque<std::unique_ptr<cudaEventPlanes>> events;
-public:
-    CudaPlaneEventsPool() : events() {}
-    ~CudaPlaneEventsPool() { }
+CudaPlaneEventsPool::CudaPlaneEventsPool() : events() {}
+CudaPlaneEventsPool::~CudaPlaneEventsPool() { }
 
-    cudaEventPlanes *PlaneStreamStart(cudaStream_t sMain, cudaStream_t sY, cudaStream_t sU, cudaStream_t sV) {
-        cudaEventPlanes *ptr = nullptr;
-        // events の中身を先頭から見て、cudaEventQueryでcudaSuccessを返るものがあれば、それを末尾に移動する
-        auto it = events.begin();
-        if (it != events.end()) {
-            if ((*it)->planeYFin() && (*it)->planeUFin() && (*it)->planeVFin()) {
-                auto e = std::move(*it);
-                events.erase(it);
-                events.push_back(std::move(e));
-                ptr = events.back().get();
-            }
-        }
-        if (!ptr) {
-            events.push_back(std::make_unique<cudaEventPlanes>());
+cudaEventPlanes *CudaPlaneEventsPool::PlaneStreamStart(cudaStream_t sMain, cudaStream_t sY, cudaStream_t sU, cudaStream_t sV) {
+    cudaEventPlanes *ptr = nullptr;
+    // events の中身を先頭から見て、cudaEventQueryでcudaSuccessを返るものがあれば、それを末尾に移動する
+    auto it = events.begin();
+    if (it != events.end()) {
+        if ((*it)->planeYFin() && (*it)->planeUFin() && (*it)->planeVFin()) {
+            auto e = std::move(*it);
+            events.erase(it);
+            events.push_back(std::move(e));
             ptr = events.back().get();
-            ptr->init();
         }
-        ptr->startPlane(sMain, sY, sU, sV);
-        return ptr;
     }
-};
+    if (!ptr) {
+        events.push_back(std::make_unique<cudaEventPlanes>());
+        ptr = events.back().get();
+        ptr->init();
+    }
+    ptr->startPlane(sMain, sY, sU, sV);
+    return ptr;
+}
 
-class cudaPlaneStreams {
-    cudaStream_t stream;
-    cudaStream_t streamY;
-    cudaStream_t streamU;
-    cudaStream_t streamV;
-    CudaPlaneEventsPool eventPool;
-public:
-    cudaPlaneStreams() : stream(nullptr), streamY(nullptr), streamU(nullptr), streamV(nullptr), eventPool() {}
-    ~cudaPlaneStreams() {
-        if (streamY) {
-            cudaStreamDestroy(streamY);
-            streamY = nullptr;
-        }
-        if (streamU) {
-            cudaStreamDestroy(streamU);
-            streamU = nullptr;
-        }
-        if (streamV) {
-            cudaStreamDestroy(streamV);
-            streamV = nullptr;
-        }
+cudaPlaneStreams::cudaPlaneStreams() : stream(nullptr), streamY(nullptr), streamU(nullptr), streamV(nullptr), eventPool() {}
+cudaPlaneStreams::~cudaPlaneStreams() {
+    if (streamY) {
+        cudaStreamDestroy(streamY);
+        streamY = nullptr;
     }
-    void initStream(cudaStream_t stream_) {
-        stream = stream_;
-        if (!streamY) {
-            cudaStreamCreateWithFlags(&streamY, cudaStreamNonBlocking);
-        }
-        if (!streamU) {
-            cudaStreamCreateWithFlags(&streamU, cudaStreamNonBlocking);
-        }
-        if (!streamV) {
-            cudaStreamCreateWithFlags(&streamV, cudaStreamNonBlocking);
-        }
+    if (streamU) {
+        cudaStreamDestroy(streamU);
+        streamU = nullptr;
     }
-    virtual cudaEventPlanes *CreateEventPlanes() {
-        return eventPool.PlaneStreamStart(stream, streamY, streamU, streamV);
+    if (streamV) {
+        cudaStreamDestroy(streamV);
+        streamV = nullptr;
     }
-    virtual void *GetDeviceStreamY() {
-        return streamY;
+}
+void cudaPlaneStreams::initStream(cudaStream_t stream_) {
+    stream = stream_;
+}
+cudaEventPlanes *cudaPlaneStreams::CreateEventPlanes() {
+    if (!streamY) {
+        cudaStreamCreateWithFlags(&streamY, cudaStreamNonBlocking);
+        cudaStreamCreateWithFlags(&streamU, cudaStreamNonBlocking);
+        cudaStreamCreateWithFlags(&streamV, cudaStreamNonBlocking);
     }
-    virtual void *GetDeviceStreamU() {
-        return streamU;
+    return eventPool.PlaneStreamStart(stream, streamY, streamU, streamV);
+}
+void *cudaPlaneStreams::GetDeviceStreamY() {
+    return streamY;
+}
+void *cudaPlaneStreams::GetDeviceStreamU() {
+    return streamU;
+}
+void *cudaPlaneStreams::GetDeviceStreamV() {
+    return streamV;
+}
+void *cudaPlaneStreams::GetDeviceStreamDefault() {
+    return stream;
+}
+void *cudaPlaneStreams::GetDeviceStreamPlane(int idx) {
+    switch (idx) {
+        case 1: return streamU;
+        case 2: return streamV;
+        case 0:
+        default: return streamY;
     }
-    virtual void *GetDeviceStreamV() {
-        return streamV;
-    }
-};
+    return stream;
+}
 
 class IMVCUDAImpl : public IMVCUDA
 {

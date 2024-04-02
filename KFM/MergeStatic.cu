@@ -139,7 +139,7 @@ class KTemporalDiff : public KFMFilterBase
 
 public:
   KTemporalDiff(PClip clip30, PNeoEnv env)
-    : KFMFilterBase(clip30)
+    : KFMFilterBase(clip30, env)
   { }
 
   PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env_)
@@ -372,7 +372,7 @@ class KAnalyzeStatic : public KFMFilterBase
 
 public:
   KAnalyzeStatic(PClip clip30, PClip diffclip, float thcombe, float thdiff, PClip pad, PNeoEnv env)
-    : KFMFilterBase(clip30)
+    : KFMFilterBase(clip30, env)
     , diffclip(diffclip)
     , thcombe(thcombe)
     , thdiff(thdiff)
@@ -524,7 +524,7 @@ class KMergeStatic : public KFMFilterBase
 
 public:
   KMergeStatic(PClip clip60, PClip clip30, PClip sttclip, PNeoEnv env)
-    : KFMFilterBase(clip60)
+    : KFMFilterBase(clip60, env)
     , clip30(clip30)
     , sttclip(sttclip)
   {

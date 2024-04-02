@@ -309,7 +309,7 @@ class KFMSuper : public KFMFilterBase
   }
 public:
   KFMSuper(PClip clip, PClip pad, IScriptEnvironment* env)
-    : KFMFilterBase(clip)
+    : KFMFilterBase(clip, env)
     , padclip(pad)
     , srcvi(vi)
   {
@@ -442,7 +442,7 @@ class KCleanSuper : public KFMFilterBase
 
 public:
   KCleanSuper(PClip clip, int thY, int thC, IScriptEnvironment* env)
-    : KFMFilterBase(clip)
+    : KFMFilterBase(clip, env)
     , thY(thY)
     , thC(thC)
   { }
@@ -545,7 +545,7 @@ class KPreCycleAnalyze : public KFMFilterBase
 
 public:
   KPreCycleAnalyze(PClip super, int threshMY, int threshSY, int threshMC, int threshSC, IScriptEnvironment* env)
-    : KFMFilterBase(super)
+    : KFMFilterBase(super, env)
     , combevi(vi)
     , prmY(threshMY, threshSY, threshSY * 3)
     , prmC(threshMC, threshSC, threshSC * 3)
@@ -643,7 +643,7 @@ class KPreCycleAnalyzeShow : public KFMFilterBase
 
 public:
   KPreCycleAnalyzeShow(PClip fmclip, PClip source, IScriptEnvironment* env)
-    : KFMFilterBase(source)
+    : KFMFilterBase(source, env)
     , fmclip(fmclip)
   { }
 
@@ -772,7 +772,7 @@ class KFMSuperShow : public KFMFilterBase
 
 public:
   KFMSuperShow(PClip combe, int threshMY, int threshSY, int threshMC, int threshSC, IScriptEnvironment* env)
-    : KFMFilterBase(combe)
+    : KFMFilterBase(combe, env)
     , combvi(vi)
     , prmY(threshMY, threshSY, threshSY * 3)
     , prmC(threshMC, threshSC, threshSC * 3)
@@ -975,7 +975,7 @@ class KTelecine : public KFMFilterBase
 
 public:
   KTelecine(PClip child, PClip fmclip, bool show, IScriptEnvironment* env)
-    : KFMFilterBase(child)
+    : KFMFilterBase(child, env)
     , fmclip(fmclip)
     , show(show)
   {
@@ -1086,7 +1086,7 @@ class KTelecineSuper : public KFMFilterBase
 
 public:
   KTelecineSuper(PClip child, PClip fmclip, IScriptEnvironment* env)
-    : KFMFilterBase(child)
+    : KFMFilterBase(child, env)
     , fmclip(fmclip)
   {
     // チェック
@@ -1550,7 +1550,7 @@ class KSwitchFlag : public KFMFilterBase
 
 public:
   KSwitchFlag(PClip combe, float thY, float thC, IScriptEnvironment* env)
-    : KFMFilterBase(combe)
+    : KFMFilterBase(combe, env)
     , srcvi(combe->GetVideoInfo())
     , combvi(combe->GetVideoInfo())
     , thY(thY)
@@ -1783,7 +1783,7 @@ class KCombeMask : public KFMFilterBase
 
 public:
   KCombeMask(PClip source, PClip flag, IScriptEnvironment* env)
-    : KFMFilterBase(source)
+    : KFMFilterBase(source, env)
     , flagclip(flag)
   {
     VideoInfo flagvi = flagclip->GetVideoInfo();
@@ -1933,7 +1933,7 @@ class KRemoveCombe : public KFMFilterBase
 
 public:
   KRemoveCombe(PClip pad, PClip super, float thY, float thC, IScriptEnvironment* env)
-    : KFMFilterBase(pad)
+    : KFMFilterBase(pad, env)
     , superclip(super)
     , thY(thY)
     , thC(thC)

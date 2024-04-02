@@ -69,7 +69,7 @@ class KPatchCombe : public KFMFilterBase
 
 public:
   KPatchCombe(PClip clip24, PClip clip60, PClip fmclip, PClip combemaskclip, PClip containscombeclip, IScriptEnvironment* env)
-    : KFMFilterBase(clip24)
+    : KFMFilterBase(clip24, env)
     , clip60(clip60)
     , combemaskclip(combemaskclip)
     , containscombeclip(containscombeclip)
@@ -553,7 +553,7 @@ public:
     PClip ucfclip,
     float thswitch, int mode, const std::string& filepath, bool is120,
 		bool show, bool showflag, IScriptEnvironment* env)
-    : KFMFilterBase(clip60)
+    : KFMFilterBase(clip60, env)
     , srcvi(vi)
     , fmclip(fmclip)
     , clip24(clip24)
@@ -758,7 +758,7 @@ class KFMPad : public KFMFilterBase
   }
 public:
   KFMPad(PClip src, IScriptEnvironment* env)
-    : KFMFilterBase(src)
+    : KFMFilterBase(src, env)
     , srcvi(vi)
   {
     if (srcvi.width & 3) env->ThrowError("[KFMPad]: width must be multiple of 4");

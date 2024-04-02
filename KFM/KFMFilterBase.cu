@@ -10,6 +10,127 @@
 #include "KFMFilterBase.cuh"
 
 
+KFMCudaEventPlanes::KFMCudaEventPlanes() : start(nullptr), endY(nullptr), endU(nullptr), endV(nullptr), streamMain(nullptr), streamY(nullptr), streamU(nullptr), streamV(nullptr) {}
+KFMCudaEventPlanes::~KFMCudaEventPlanes() {
+    if (start) cudaEventDestroy(start);
+    if (endY) cudaEventDestroy(endY);
+    if (endU) cudaEventDestroy(endU);
+    if (endV) cudaEventDestroy(endV);
+}
+void KFMCudaEventPlanes::init() {
+    if (!start) cudaEventCreate(&start);
+    if (!endY) cudaEventCreate(&endY);
+    if (!endU) cudaEventCreate(&endU);
+    if (!endV) cudaEventCreate(&endV);
+}
+void KFMCudaEventPlanes::startPlane(cudaStream_t sMain, cudaStream_t sY, cudaStream_t sU, cudaStream_t sV) {
+    streamMain = sMain;
+    streamY = sY;
+    streamU = sU;
+    streamV = sV;
+    cudaEventRecord(start, sMain);
+    if (sY) {
+        cudaStreamWaitEvent(sY, start);
+    }
+    if (sU) {
+        cudaStreamWaitEvent(sU, start);
+    }
+    if (sV) {
+        cudaStreamWaitEvent(sV, start);
+    }
+}
+void KFMCudaEventPlanes::finPlane() {
+    if (streamY) cudaEventRecord(endY, streamY);
+    if (streamU) cudaEventRecord(endU, streamU);
+    if (streamV) cudaEventRecord(endV, streamV);
+    if (streamY || streamU || streamV) {
+        if (streamY) cudaStreamWaitEvent(streamMain, endY);
+        if (streamU) cudaStreamWaitEvent(streamMain, endU);
+        if (streamV) cudaStreamWaitEvent(streamMain, endV);
+    }
+}
+bool KFMCudaEventPlanes::planeYFin() {
+    return cudaEventQuery(endY) == cudaSuccess;
+}
+bool KFMCudaEventPlanes::planeUFin() {
+    return cudaEventQuery(endU) == cudaSuccess;
+}
+bool KFMCudaEventPlanes::planeVFin() {
+    return cudaEventQuery(endV) == cudaSuccess;
+}
+
+KFMCudaPlaneEventsPool::KFMCudaPlaneEventsPool() : events() {}
+KFMCudaPlaneEventsPool::~KFMCudaPlaneEventsPool() { }
+
+KFMCudaEventPlanes *KFMCudaPlaneEventsPool::PlaneStreamStart(cudaStream_t sMain, cudaStream_t sY, cudaStream_t sU, cudaStream_t sV) {
+    KFMCudaEventPlanes *ptr = nullptr;
+    // events ‚Ì’†g‚ðæ“ª‚©‚çŒ©‚ÄAcudaEventQuery‚ÅcudaSuccess‚ð•Ô‚é‚à‚Ì‚ª‚ ‚ê‚ÎA‚»‚ê‚ð––”ö‚ÉˆÚ“®‚·‚é
+    auto it = events.begin();
+    if (it != events.end()) {
+        if ((*it)->planeYFin() && (*it)->planeUFin() && (*it)->planeVFin()) {
+            auto e = std::move(*it);
+            events.erase(it);
+            events.push_back(std::move(e));
+            ptr = events.back().get();
+        }
+    }
+    if (!ptr) {
+        events.push_back(std::make_unique<KFMCudaEventPlanes>());
+        ptr = events.back().get();
+        ptr->init();
+    }
+    ptr->startPlane(sMain, sY, sU, sV);
+    return ptr;
+}
+
+KFMCudaPlaneStreams::KFMCudaPlaneStreams() : stream(nullptr), streamY(nullptr), streamU(nullptr), streamV(nullptr), eventPool() {}
+KFMCudaPlaneStreams::~KFMCudaPlaneStreams() {
+    if (streamY) {
+        cudaStreamDestroy(streamY);
+        streamY = nullptr;
+    }
+    if (streamU) {
+        cudaStreamDestroy(streamU);
+        streamU = nullptr;
+    }
+    if (streamV) {
+        cudaStreamDestroy(streamV);
+        streamV = nullptr;
+    }
+}
+void KFMCudaPlaneStreams::initStream(cudaStream_t stream_) {
+    stream = stream_;
+}
+KFMCudaEventPlanes *KFMCudaPlaneStreams::CreateEventPlanes() {
+    if (!streamY) {
+        cudaStreamCreateWithFlags(&streamY, cudaStreamNonBlocking);
+        cudaStreamCreateWithFlags(&streamU, cudaStreamNonBlocking);
+        cudaStreamCreateWithFlags(&streamV, cudaStreamNonBlocking);
+    }
+    return eventPool.PlaneStreamStart(stream, streamY, streamU, streamV);
+}
+void *KFMCudaPlaneStreams::GetDeviceStreamY() {
+    return streamY;
+}
+void *KFMCudaPlaneStreams::GetDeviceStreamU() {
+    return streamU;
+}
+void *KFMCudaPlaneStreams::GetDeviceStreamV() {
+    return streamV;
+}
+void *KFMCudaPlaneStreams::GetDeviceStreamDefault() {
+    return stream;
+}
+void *KFMCudaPlaneStreams::GetDeviceStreamPlane(int idx) {
+    switch (idx) {
+        case 1: return streamU;
+        case 2: return streamV;
+        case 0:
+        default: return streamY;
+    }
+    return stream;
+}
+
 int scaleParam(float thresh, int pixelBits)
 {
   return (int)(thresh * (1 << (pixelBits - 8)) + 0.5f);
@@ -1083,12 +1204,17 @@ void KFMFilterBase::MergeBlock(Frame& src24, Frame& src60, Frame& flag, Frame& d
 template void KFMFilterBase::MergeBlock<uint8_t>(Frame& src24, Frame& src60, Frame& flag, Frame& dst, PNeoEnv env);
 template void KFMFilterBase::MergeBlock<uint16_t>(Frame& src24, Frame& src60, Frame& flag, Frame& dst, PNeoEnv env);
 
-KFMFilterBase::KFMFilterBase(PClip _child)
+KFMFilterBase::KFMFilterBase(PClip _child, IScriptEnvironment* env_)
   : GenericVideoFilter(_child)
   , srcvi(vi)
   , logUVx(vi.GetPlaneWidthSubsampling(PLANAR_U))
   , logUVy(vi.GetPlaneHeightSubsampling(PLANAR_U))
-{ }
+  , planeStreams(std::make_unique<KFMCudaPlaneStreams>())
+{
+    if (env_) {
+        planeStreams->initStream((cudaStream_t)((PNeoEnv)env_)->GetDeviceStream());
+    }
+}
 
 int __stdcall KFMFilterBase::SetCacheHints(int cachehints, int frame_range) {
   if (cachehints == CACHE_GET_DEV_TYPE) {

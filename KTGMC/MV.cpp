@@ -2168,9 +2168,9 @@ class PlaneOfBlocksCUDA : public PlaneOfBlocksBase
   int* next;
   void* blocks;
   void* batchdata;
-  void* hbatchdata;
+  cudaHostBatchParams hbatchdata;
   void *loadmvbatchdata;
-  void *hloadmvbatchdata;
+  cudaHostBatchParams hloadmvbatchdata;
 
   enum { N_CONST_VEC = 4 };
 
@@ -2192,13 +2192,12 @@ public:
       next(nullptr),
       blocks(nullptr),
       batchdata(nullptr),
-      hbatchdata(nullptr),
+      hbatchdata(),
       loadmvbatchdata(nullptr),
-      hloadmvbatchdata(nullptr)
+      hloadmvbatchdata()
   { }
 
   ~PlaneOfBlocksCUDA() {
-      free(hbatchdata);
   }
 
   int GetWorkSize()
@@ -2282,10 +2281,8 @@ public:
       kernel->LoadMV(src[i], vectors + vecPitch * i, sads + sadPitch * i, nCount);
     }
 #else
-    if (!hloadmvbatchdata) {
-        hloadmvbatchdata = malloc(ANALYZE_MAX_BATCH * kernel->GetLoadMVBatchSize());
-    }
-    kernel->LoadMVBatch(loadmvbatchdata, hloadmvbatchdata, batch, src, out, vectors, vecPitch, sads, sadPitch, nCount);
+    auto hloadmvbatchdataptr = hloadmvbatchdata.getNewParam(ANALYZE_MAX_BATCH * kernel->GetLoadMVBatchSize());
+    kernel->LoadMVBatch(loadmvbatchdata, hloadmvbatchdataptr, batch, src, out, vectors, vecPitch, sads, sadPitch, nCount);
 #endif
   }
 
@@ -2331,11 +2328,9 @@ public:
     int nImgPitchY = nSrcPitchY * pSrcYPlane->GetExtendedHeight();
     int nImgPitchUV = (p.chroma ? (nSrcPitchUV * pSrcUPlane->GetExtendedHeight()) : 0);
 
-    if (!hbatchdata) {
-        hbatchdata = malloc(ANALYZE_MAX_BATCH * kernel->GetSearchBatchSize());
-    }
+    auto hbatchdataptr = hbatchdata.getNewParam(ANALYZE_MAX_BATCH * kernel->GetSearchBatchSize());
 
-    kernel->Search(batch, out, batchdata, hbatchdata, p.searchType, p.nBlkX, p.nBlkY, p.nBlkSizeX,
+    kernel->Search(batch, out, batchdata, hbatchdataptr, p.searchType, p.nBlkX, p.nBlkY, p.nBlkSizeX,
       p.nLogScale, p.nLambdaLevel, p.lsad, p.penaltyZero,
       p.pglobal, p.penaltyNew, p.nPel, p.chroma,
       pSrcYPlane->GetHPadding(), nBlkSizeX, nExtendedWidth, nExtendedHeight,
@@ -4488,6 +4483,8 @@ class KMDegrainX : public GenericVideoFilter
   std::unique_ptr<KMSuperFrame> superB[MAX_DEGRAIN];
   std::unique_ptr<KMSuperFrame> superF[MAX_DEGRAIN];
 
+  cudaHostBatchParams hdegrainarg;
+
   KMDegrainCoreBase* CreateCore(
     bool isUV, int nLimit,
     KMVClip* mvClipB[MAX_DEGRAIN],
@@ -4637,6 +4634,8 @@ class KMDegrainX : public GenericVideoFilter
     uint8_t* degrainarg = degrainblock[0] + blockBytes;
     int* sceneChange = (int*)(degrainarg + argBytes);
 
+    auto hdegrainargptr = hdegrainarg.getNewParam(argBytes);
+
     const pixel_t *prefB[3 * MAX_DEGRAIN] = { 0 };
     const pixel_t *prefF[3 * MAX_DEGRAIN] = { 0 };
     const pixel_t *psrc[3] = { 0 };
@@ -4716,7 +4715,7 @@ class KMDegrainX : public GenericVideoFilter
       psrc, pdst, ptmp, prefB, prefF,
       nSrcPitchY, nSrcPitchUV,
       nSuperPitchY, nSuperPitchUV, nImgPitchY, nImgPitchUV,
-      (void **)degrainblock, degrainarg, sceneChange, cuda.get());
+      (void **)degrainblock, degrainarg, hdegrainargptr, sceneChange, cuda.get());
 
     return dst;
   }
@@ -5250,7 +5249,7 @@ class KMCompensate : public GenericVideoFilter
     PVideoFrame tmp = env->NewVideoFrame(tmpvi);
 
     // ƒ[ƒNŠm•Û
-    int blockBytes = cuda->get(pixel_t())->GetCompensateStructSize() * nBlkX * nBlkY;
+    int blockBytes = cuda->get(pixel_t())->GetCompensateStructSize() * nBlkX * nBlkY * 3/*YUV*/;
     int scBytes = sizeof(int);
     int work_bytes = blockBytes + scBytes;
     VideoInfo workvi = VideoInfo();
@@ -5259,8 +5258,11 @@ class KMCompensate : public GenericVideoFilter
     workvi.height = nblocks(work_bytes, workvi.width * 4);
     PVideoFrame work = env->NewVideoFrame(workvi);
 
-    uint8_t* compensateblock = work->GetWritePtr();
-    int* sceneChange = (int*)(compensateblock + blockBytes);
+    uint8_t* compensateblock[3];
+    compensateblock[0] = work->GetWritePtr();
+    compensateblock[1] = compensateblock[0] + cuda->get(pixel_t())->GetCompensateStructSize() * nBlkX * nBlkY;
+    compensateblock[2] = compensateblock[1] + cuda->get(pixel_t())->GetCompensateStructSize() * nBlkX * nBlkY;
+    int* sceneChange = (int*)(compensateblock[0] + blockBytes);
 
     const pixel_t *pref[3 * 2] = { 0 };
     const pixel_t *psrc[3] = { 0 };
@@ -5325,7 +5327,7 @@ class KMCompensate : public GenericVideoFilter
       psrc, pdst, ptmp, pref,
       nSrcPitchY, nSrcPitchUV,
       nSuperPitchY, nSuperPitchUV, nImgPitchY, nImgPitchUV,
-      compensateblock, sceneChange);
+      (void **)compensateblock, sceneChange, cuda.get());
 
     return dst;
   }

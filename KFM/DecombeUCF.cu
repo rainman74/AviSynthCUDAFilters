@@ -152,7 +152,7 @@ class KFieldDiff : public KFMFilterBase
 
 public:
   KFieldDiff(PClip clip, float nt, bool chroma)
-    : KFMFilterBase(clip)
+    : KFMFilterBase(clip, nullptr)
     , nt6(scaleParam(nt * 6, vi.BitsPerComponent()))
     , chroma(chroma)
     , padvi(vi)
@@ -476,7 +476,7 @@ class KFrameDiffDup : public KFMFilterBase
 
 public:
   KFrameDiffDup(PClip clip, bool chroma, int blocksize)
-    : KFMFilterBase(clip)
+    : KFMFilterBase(clip, nullptr)
     , chroma(chroma)
     , blocksize(blocksize)
     , logUVx(vi.GetPlaneWidthSubsampling(PLANAR_U))
@@ -637,7 +637,7 @@ class KNoiseClip : public KFMFilterBase
 public:
   KNoiseClip(PClip src, PClip noise,
     int nmin_y, int range_y, int nmin_uv, int range_uv, IScriptEnvironment* env)
-    : KFMFilterBase(src)
+    : KFMFilterBase(src, env)
     , noiseclip(noise)
     , range_y(range_y)
     , range_uv(range_uv)
@@ -1042,7 +1042,7 @@ class KAnalyzeNoise : public KFMFilterBase
   }
 public:
   KAnalyzeNoise(PClip src, PClip noise, PClip pad, IScriptEnvironment* env)
-    : KFMFilterBase(src)
+    : KFMFilterBase(src, env)
     , noiseclip(noise)
     , srcvi(vi)
     , padvi(vi)
@@ -1465,7 +1465,7 @@ class KDecombUCF : public KFMFilterBase
 
 public:
   KDecombUCF(PClip clip24, PClip paramclip, PClip noiseclip, PClip beforeclip, PClip afterclip, PClip nrclip, IScriptEnvironment* env)
-    : KFMFilterBase(clip24)
+    : KFMFilterBase(clip24, env)
     , paramclip(paramclip)
     , noiseclip(noiseclip)
     , beforeclip(beforeclip)
@@ -1596,7 +1596,7 @@ class KDecombUCF24 : public KFMFilterBase
 
 public:
   KDecombUCF24(PClip clip24, PClip paramclip, PClip fmclip, PClip noiseclip, PClip beforeclip, PClip afterclip, PClip dweaveclip, PClip nrclip, IScriptEnvironment* env)
-    : KFMFilterBase(clip24)
+    : KFMFilterBase(clip24, env)
     , paramclip(paramclip)
     , fmclip(fmclip)
     , noiseclip(noiseclip)
@@ -2010,7 +2010,7 @@ class KDecombUCF60 : public KFMFilterBase
 
 public:
   KDecombUCF60(PClip clip60, PClip flagclip, PClip beforeclip, PClip afterclip, PClip nrclip, IScriptEnvironment* env)
-    : KFMFilterBase(clip60)
+    : KFMFilterBase(clip60, env)
     , flagclip(flagclip)
     , beforeclip(beforeclip)
     , afterclip(afterclip)

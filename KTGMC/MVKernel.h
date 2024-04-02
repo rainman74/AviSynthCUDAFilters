@@ -1,10 +1,10 @@
 #pragma once
 #include "avisynth.h"
-
 #define NOMINMAX
 #include <windows.h>
 
 #include "CommonFunctions.h"
+#include "Misc.h"
 #include "KMV.h"
 
 enum {
@@ -50,13 +50,13 @@ public:
     int normFactor, int normov, int atotal, int aodd, int aeven) = 0;
   virtual void LoadMV(const VECTOR* in, short2* vectors, int* sads, int nBlkCount) = 0;
   virtual void StoreMV(VECTOR* out, const short2* vectors, const int* sads, int nBlkCount) = 0;
-  virtual void LoadMVBatch(void* _loadmvbatch, void* _hloadmvbatch, int batch,
+  virtual void LoadMVBatch(void* _loadmvbatch, cudaHostBatchParam* _hloadmvbatch, int batch,
       const VECTOR** in, VECTOR** out, short2* vectors, int vectorsPitch, int* sads, int sadPitch, int nBlkCount) = 0;
   virtual void WriteDefaultMV(VECTOR* dst, int nBlkCount, int verybigSAD) = 0;
 
   // 36 args
   virtual void Search(
-    int batch, VECTOR **out, void* _searchbatch, void* _hsearchbatch,
+    int batch, VECTOR **out, void* _searchbatch, cudaHostBatchParam* _hsearchbatch,
     int searchType, int nBlkX, int nBlkY, int nBlkSize, int nLogScale,
     int nLambdaLevel, int lsad, int penaltyZero, int penaltyGlobal, int penaltyNew,
     int nPel, bool chroma, int nPad, int nBlkSizeOvr, int nExtendedWidth, int nExptendedHeight,
@@ -78,7 +78,7 @@ public:
     const pixel_t** pSrc, pixel_t** pDst, tmp_t** pTmp, const pixel_t** pRefB, const pixel_t** pRefF,
     int nPitchY, int nPitchUV,
     int nPitchSuperY, int nPitchSuperUV, int nImgPitchY, int nImgPitchUV,
-    void** _degrainblock, void* _degrainarg, int* sceneChange, IMVCUDA *cuda) = 0;
+    void** _degrainblock, void* _degrainarg, cudaHostBatchParam* _hdegrainarg, int* sceneChange, IMVCUDA *cuda) = 0;
 
   // Compensate //
   virtual int GetCompensateStructSize() = 0;
@@ -91,28 +91,7 @@ public:
     const pixel_t** pSrc, pixel_t** pDst, tmp_t** pTmp, const pixel_t** pRef,
     int nPitchY, int nPitchUV,
     int nPitchSuperY, int nPitchSuperUV, int nImgPitchY, int nImgPitchUV,
-    void* _compensateblock, int* sceneChange) = 0;
-};
-
-class cudaEventPlanes {
-protected:
-    cudaEvent_t start;
-    cudaEvent_t endY;
-    cudaEvent_t endU;
-    cudaEvent_t endV;
-    cudaStream_t streamMain;
-    cudaStream_t streamY;
-    cudaStream_t streamU;
-    cudaStream_t streamV;
-public:
-    cudaEventPlanes();
-    ~cudaEventPlanes();
-    void init();
-    void startPlane(cudaStream_t sMain, cudaStream_t sY, cudaStream_t sU, cudaStream_t sV);
-    void finPlane();
-    bool planeYFin();
-    bool planeUFin();
-    bool planeVFin();
+    void** _compensateblock, int* sceneChange, IMVCUDA *cuda) = 0;
 };
 
 class IMVCUDA

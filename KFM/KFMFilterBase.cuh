@@ -1,6 +1,8 @@
 
 #include <stdint.h>
 #include <avisynth.h>
+#include <memory>
+#include <deque>
 #include "Frame.h"
 
 struct FrameOldAnalyzeParam {
@@ -15,11 +17,62 @@ struct FrameOldAnalyzeParam {
   { }
 };
 
+class KFMCudaEventPlanes {
+protected:
+    cudaEvent_t start;
+    cudaEvent_t endY;
+    cudaEvent_t endU;
+    cudaEvent_t endV;
+    cudaStream_t streamMain;
+    cudaStream_t streamY;
+    cudaStream_t streamU;
+    cudaStream_t streamV;
+public:
+    KFMCudaEventPlanes();
+    ~KFMCudaEventPlanes();
+    void init();
+    void startPlane(cudaStream_t sMain, cudaStream_t sY, cudaStream_t sU, cudaStream_t sV);
+    void finPlane();
+    bool planeYFin();
+    bool planeUFin();
+    bool planeVFin();
+};
+
+class KFMCudaPlaneEventsPool {
+protected:
+    std::deque<std::unique_ptr<KFMCudaEventPlanes>> events;
+public:
+    KFMCudaPlaneEventsPool();
+    ~KFMCudaPlaneEventsPool();
+
+    KFMCudaEventPlanes *PlaneStreamStart(cudaStream_t sMain, cudaStream_t sY, cudaStream_t sU, cudaStream_t sV);
+};
+
+class KFMCudaPlaneStreams {
+    cudaStream_t stream;
+    cudaStream_t streamY;
+    cudaStream_t streamU;
+    cudaStream_t streamV;
+    KFMCudaPlaneEventsPool eventPool;
+public:
+    KFMCudaPlaneStreams();
+    ~KFMCudaPlaneStreams();
+    void initStream(cudaStream_t stream_);
+    KFMCudaEventPlanes *CreateEventPlanes();
+    void *GetDeviceStreamY();
+    void *GetDeviceStreamU();
+    void *GetDeviceStreamV();
+    void *GetDeviceStreamDefault();
+    void *GetDeviceStreamPlane(int idx);
+};
+
+
 class KFMFilterBase : public GenericVideoFilter {
 protected:
   VideoInfo srcvi;
   int logUVx;
   int logUVy;
+  std::unique_ptr<KFMCudaPlaneStreams> planeStreams;
 
   template <typename pixel_t>
   void CopyFrame(Frame& src, Frame& dst, PNeoEnv env);
@@ -60,8 +113,14 @@ protected:
   template <typename pixel_t>
   void MergeBlock(Frame& src24, Frame& src60, Frame& flag, Frame& dst, PNeoEnv env);
 
+  KFMCudaEventPlanes *CreateEventPlanes() {
+      return (planeStreams) ? planeStreams->CreateEventPlanes() : nullptr;
+  }
+  void *GetDeviceStreamPlane(int idx) {
+      return (planeStreams) ? planeStreams->GetDeviceStreamPlane(idx) : nullptr;
+  }
 public:
-  KFMFilterBase(PClip _child);
+  KFMFilterBase(PClip _child, IScriptEnvironment* env);
 
   int __stdcall SetCacheHints(int cachehints, int frame_range);
 };
