@@ -629,6 +629,21 @@ __global__ void kl_extend_coef(vpixel_t* dst, const vpixel_t* __restrict__ src, 
 }
 
 template <typename vpixel_t>
+__global__ void kl_extend_coef2(vpixel_t* dst, const vpixel_t* __restrict__ src, int width, int height, int pitch)
+{
+  int x = threadIdx.x + blockIdx.x * blockDim.x;
+  int y = threadIdx.y + blockIdx.y * blockDim.y;
+
+  if (x < width && y < height) {
+    int y0 = max(y - 1, 0);
+    int y1 = y;
+    int y2 = min(y + 1, height - 1);
+    int4 tmp = max(to_int(src[x + y0 * pitch]), max(to_int(src[x + y1 * pitch]), to_int(src[x + y2 * pitch])));
+    dst[x + y * pitch] = VHelper<vpixel_t>::cast_to(tmp);
+  }
+}
+
+template <typename vpixel_t>
 void cpu_calc_combe(vpixel_t* dst, const vpixel_t* src, int width, int height, int pitch)
 {
   for (int y = 0; y < height; ++y) {
@@ -947,17 +962,25 @@ void KFMFilterBase::ExtendCoefs(Frame& src, Frame& dst, PNeoEnv env)
   int width4 = vi.width >> 2;
 
   if (IS_CUDA) {
-		cudaStream_t stream = static_cast<cudaStream_t>(env->GetDeviceStream());
-    dim3 threads(32, 16);
-    dim3 blocks(nblocks(width4, threads.x), nblocks(vi.height, threads.y));
-    kl_extend_coef << <blocks, threads, 0, stream >> > (
-      dstY + pitchY, srcY + pitchY, width4, vi.height - 2, pitchY);
-    DEBUG_SYNC;
-    dim3 threadsB(32, 1);
-    dim3 blocksB(nblocks(width4, threads.x));
-    kl_copy_border << <blocksB, threadsB, 0, stream >> > (
-      dstY, srcY, width4, vi.height, pitchY, 1);
-    DEBUG_SYNC;
+	cudaStream_t stream = static_cast<cudaStream_t>(env->GetDeviceStream());
+    if (true) {
+        dim3 threads(32, 16);
+        dim3 blocks(nblocks(width4, threads.x), nblocks(vi.height, threads.y));
+        kl_extend_coef2 << <blocks, threads, 0, stream >> > (
+            dstY, srcY, width4, vi.height, pitchY);
+        DEBUG_SYNC;
+    } else {
+        dim3 threads(32, 16);
+        dim3 blocks(nblocks(width4, threads.x), nblocks(vi.height, threads.y));
+        kl_extend_coef << <blocks, threads, 0, stream >> > (
+            dstY + pitchY, srcY + pitchY, width4, vi.height - 2, pitchY);
+        DEBUG_SYNC;
+        dim3 threadsB(32, 1);
+        dim3 blocksB(nblocks(width4, threads.x));
+        kl_copy_border << <blocksB, threadsB, 0, stream >> > (
+            dstY, srcY, width4, vi.height, pitchY, 1);
+        DEBUG_SYNC;
+    }
   }
   else {
     cpu_extend_coef(dstY + pitchY, srcY + pitchY, width4, vi.height - 2, pitchY);
