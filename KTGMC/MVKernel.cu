@@ -2805,7 +2805,7 @@ public:
     const VECTOR** mvB, const VECTOR** mvF,
     const pixel_t** pSrc, pixel_t** pDst, tmp_t** pTmp, const pixel_t** pRefB, const pixel_t** pRefF,
     int nPitch, int nPitchUV, int nPitchSuperY, int nPitchSuperUV, int nImgPitch, int nImgPitchUV,
-    void* _degrainblocks, void* _degraindarg, int *sceneChangeB, int *sceneChangeF, IMVCUDA *cuda
+    void** _degrainblocks, void* _degraindarg, int *sceneChangeB, int *sceneChangeF, IMVCUDA *cuda
     );
 
   // pTmpはpSrcと同じpitchであること
@@ -2819,7 +2819,7 @@ public:
     const VECTOR** mvB, const VECTOR** mvF,
     const pixel_t** pSrc, pixel_t** pDst, tmp_t** pTmp, const pixel_t** pRefB, const pixel_t** pRefF,
     int nPitchY, int nPitchUV, int nPitchSuperY, int nPitchSuperUV, int nImgPitchY, int nImgPitchUV,
-    void* _degrainblocks, void* _degraindarg, int *sceneChangeB, int *sceneChangeF, IMVCUDA *cuda
+    void** _degrainblocks, void* _degraindarg, int *sceneChangeB, int *sceneChangeF, IMVCUDA *cuda
   )
   {
 
@@ -2893,7 +2893,7 @@ public:
       env->ThrowError("[Degrain] 未対応Pel");
     }
 
-    DegrainBlock<pixel_t, N>* degrainblocks = (DegrainBlock<pixel_t, N>*)_degrainblocks;
+    DegrainBlock<pixel_t, N>** degrainblocks = (DegrainBlock<pixel_t, N>**)_degrainblocks;
     const int max_pixel_value = (1 << nBitsPerPixel) - 1;
 
     auto planeEvent = cuda->CreateEventPlanes();
@@ -2923,7 +2923,7 @@ public:
           (p == 0) ? thSAD : thSADC,
           (p == 0) ? ovrwins : overwinsUV,
           sceneChangeB, sceneChangeF, &dargs[p],
-          degrainblocks, pitch, pitchsuper, imgpitch, planeStream);
+          degrainblocks[p], pitch, pitchsuper, imgpitch, planeStream);
 
         // pTmp初期化
         launch_elementwise<vtmp_t, SetZeroFunction<vtmp_t>>(
@@ -2962,10 +2962,10 @@ public:
         }
 
         // 4回カーネル呼び出し
-        (this->*degrain_func)(0, 0, nBlkX, nBlkY, degrainblocks, pTmp[p], pitchX, pitchsuperX, planeStream);
-        (this->*degrain_func)(1, 0, nBlkX, nBlkY, degrainblocks, pTmp[p], pitchX, pitchsuperX, planeStream);
-        (this->*degrain_func)(0, 1, nBlkX, nBlkY, degrainblocks, pTmp[p], pitchX, pitchsuperX, planeStream);
-        (this->*degrain_func)(1, 1, nBlkX, nBlkY, degrainblocks, pTmp[p], pitchX, pitchsuperX, planeStream);
+        (this->*degrain_func)(0, 0, nBlkX, nBlkY, degrainblocks[p], pTmp[p], pitchX, pitchsuperX, planeStream);
+        (this->*degrain_func)(1, 0, nBlkX, nBlkY, degrainblocks[p], pTmp[p], pitchX, pitchsuperX, planeStream);
+        (this->*degrain_func)(0, 1, nBlkX, nBlkY, degrainblocks[p], pTmp[p], pitchX, pitchsuperX, planeStream);
+        (this->*degrain_func)(1, 1, nBlkX, nBlkY, degrainblocks[p], pTmp[p], pitchX, pitchsuperX, planeStream);
 
         // tmp_t -> pixel_t 変換
         launch_short_to_byte<vpixel_t, vtmp_t>(
@@ -3012,7 +3012,7 @@ public:
     const pixel_t** pSrc, pixel_t** pDst, tmp_t** pTmp, const pixel_t** pRefB, const pixel_t** pRefF,
     int nPitchY, int nPitchUV,
     int nPitchSuperY, int nPitchSuperUV, int nImgPitchY, int nImgPitchUV,
-    void* _degrainblock, void* _degrainarg, int* sceneChange, IMVCUDA *cuda)
+    void** _degrainblock, void* _degrainarg, int* sceneChange, IMVCUDA *cuda)
   {
     int numRef = N * 2;
     int numBlks = nBlkX * nBlkY;

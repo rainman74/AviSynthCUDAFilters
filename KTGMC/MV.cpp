@@ -4620,7 +4620,7 @@ class KMDegrainX : public GenericVideoFilter
     int degrainBlock;
     int degrainArg;
     cuda->get(pixel_t())->GetDegrainStructSize(delta, degrainBlock, degrainArg);
-    int blockBytes = degrainBlock * nBlkX * nBlkY;
+    int blockBytes = degrainBlock * nBlkX * nBlkY * 3 /*YUV*/;
     int argBytes = degrainArg * 3;
     int scBytes = delta * 2 * sizeof(int);
     int work_bytes = blockBytes + argBytes + scBytes;
@@ -4630,8 +4630,11 @@ class KMDegrainX : public GenericVideoFilter
     workvi.height = nblocks(work_bytes, workvi.width * 4);
     PVideoFrame work = env->NewVideoFrame(workvi);
 
-    uint8_t* degrainblock = work->GetWritePtr();
-    uint8_t* degrainarg = degrainblock + blockBytes;
+    uint8_t* degrainblock[3];
+    degrainblock[0] = work->GetWritePtr();
+    degrainblock[1] = degrainblock[0] + degrainBlock * nBlkX * nBlkY;
+    degrainblock[2] = degrainblock[1] + degrainBlock * nBlkX * nBlkY;
+    uint8_t* degrainarg = degrainblock[0] + blockBytes;
     int* sceneChange = (int*)(degrainarg + argBytes);
 
     const pixel_t *prefB[3 * MAX_DEGRAIN] = { 0 };
@@ -4713,7 +4716,7 @@ class KMDegrainX : public GenericVideoFilter
       psrc, pdst, ptmp, prefB, prefF,
       nSrcPitchY, nSrcPitchUV,
       nSuperPitchY, nSuperPitchUV, nImgPitchY, nImgPitchUV,
-      degrainblock, degrainarg, sceneChange, cuda.get());
+      (void **)degrainblock, degrainarg, sceneChange, cuda.get());
 
     return dst;
   }

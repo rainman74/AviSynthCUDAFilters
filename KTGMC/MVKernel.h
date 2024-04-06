@@ -78,7 +78,7 @@ public:
     const pixel_t** pSrc, pixel_t** pDst, tmp_t** pTmp, const pixel_t** pRefB, const pixel_t** pRefF,
     int nPitchY, int nPitchUV,
     int nPitchSuperY, int nPitchSuperUV, int nImgPitchY, int nImgPitchUV,
-    void* _degrainblock, void* _degrainarg, int* sceneChange, IMVCUDA *cuda) = 0;
+    void** _degrainblock, void* _degrainarg, int* sceneChange, IMVCUDA *cuda) = 0;
 
   // Compensate //
   virtual int GetCompensateStructSize() = 0;
