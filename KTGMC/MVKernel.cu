@@ -354,6 +354,24 @@ __device__ const pixel_t* dev_get_ref_block(const pixel_t* pRef, int nPitch, int
   }
 }
 
+__device__ unsigned int __vabsdiff4(unsigned int srcA, unsigned int srcB, unsigned int c) {
+    unsigned int d;
+    asm volatile("vabsdiff4.u32.u32.u32.add %0,%1,%2,%3;":"=r"(d) : "r"(srcA), "r"(srcB), "r"(c));
+    return d;
+}
+
+template <typename pixel_t>
+__device__ unsigned int load4pix(const pixel_t *ptr, int x, int y, int pitch, int offset) {
+    // 4バイト境界になるようにオフセットを加算してロード
+    unsigned int ret = *(unsigned int*)&ptr[x + y * pitch - offset];
+    if (offset > 0) {
+        // 次の4バイトをロードしてoffset分だけシフトして結合
+        unsigned int hi32 = *(unsigned int*)&ptr[x + y * pitch - offset + 4];
+        ret = __funnelshift_rc(ret, hi32, offset * 8);
+    }
+    return ret;
+}
+
 template <typename pixel_t, int BLK_SIZE, bool CHROMA>
 __device__ sad_t dev_calc_sad(
   int wi,
@@ -366,17 +384,58 @@ __device__ sad_t dev_calc_sad(
     HALF_UV = BLK_SIZE / 4,
   };
   int sad = 0;
-  int yx = wi;
-  for (int yy = 0; yy < BLK_SIZE; ++yy) { // 16回ループ
-    sad = __sad(pSrcY[yx + yy * BLK_SIZE], pRefY[yx + yy * nPitchY], sad);
+  if (sizeof(pixel_t) == 1) {
+    const int threadnum = BLK_SIZE; // このブロックを担当するスレッド数
+    const int step = 4;             // 4pixずつ処理
+    const int threadPerLine = BLK_SIZE / step; // 1行に必要なスレッド数
+    const int yx = (wi % threadPerLine) * step; // 1行の中での位置
+          int yy =  wi / threadPerLine;          // 担当する行
+    const int ystep = threadnum / threadPerLine;
+    const int srcYoffset = ((uint32_t)(size_t)pSrcY) & (sizeof(uchar4) - 1); // 4バイト境界になるようにオフセットを計算
+    const int refYoffset = ((uint32_t)(size_t)pRefY) & (sizeof(uchar4) - 1); // 4バイト境界になるようにオフセットを計算
+    #pragma unroll
+    for (int i = 0; i < BLK_SIZE; i += ystep, yy += ystep) { // 4回ループ
+        unsigned int src4 = load4pix(pSrcY, yx, yy, BLK_SIZE, srcYoffset);
+        unsigned int ref4 = load4pix(pRefY, yx, yy, nPitchY,  refYoffset);
+        sad = __vabsdiff4(src4, ref4, sad);
+    }
+  } else {
+    int yx = wi;
+    for (int yy = 0; yy < BLK_SIZE; yy++) { // 16回ループ
+      sad = __sad(pSrcY[yx + yy * BLK_SIZE], pRefY[yx + yy * nPitchY], sad);
+    }
   }
   if (CHROMA) {
-    // UVは8x8
-    int uvx = wi % BLK_SIZE_UV;
-    int uvy = wi / BLK_SIZE_UV;
-    for (int t = 0; t < HALF_UV; ++t, uvy += 2) { // 4回ループ
-      sad = __sad(pSrcU[uvx + uvy * BLK_SIZE_UV], pRefU[uvx + uvy * nPitchU], sad);
-      sad = __sad(pSrcV[uvx + uvy * BLK_SIZE_UV], pRefV[uvx + uvy * nPitchV], sad);
+    if (sizeof(pixel_t) == 1 && BLK_SIZE >= 16) {
+        const int threadnum = BLK_SIZE; // このブロックを担当するスレッド数
+        const int step = 4;             // 4pixずつ処理
+        const int threadPerLine = BLK_SIZE_UV / step; // 1行に必要なスレッド数
+        const int uvx = (wi % threadPerLine) * step; // 1行の中での位置
+              int uvy =  wi / threadPerLine;          // 担当する行
+        const int ystep = threadnum / threadPerLine;
+        const int srcUoffset = ((uint32_t)(size_t)pSrcU) & (sizeof(uchar4) - 1); // 4バイト境界になるようにオフセットを計算
+        const int refUoffset = ((uint32_t)(size_t)pRefU) & (sizeof(uchar4) - 1); // 4バイト境界になるようにオフセットを計算
+        const int srcVoffset = ((uint32_t)(size_t)pSrcV) & (sizeof(uchar4) - 1); // 4バイト境界になるようにオフセットを計算
+        const int refVoffset = ((uint32_t)(size_t)pRefV) & (sizeof(uchar4) - 1); // 4バイト境界になるようにオフセットを計算
+        #pragma unroll
+        for (int t = 0; t < BLK_SIZE_UV; t += ystep, uvy += ystep) { // 1回ループ
+            unsigned int src4, ref4;
+            src4 = load4pix(pSrcU, uvx, uvy, BLK_SIZE_UV, srcUoffset);
+            ref4 = load4pix(pRefU, uvx, uvy, nPitchU,     refUoffset);
+            sad = __vabsdiff4(src4, ref4, sad);
+            // -------------------------------------------------------------------------------
+            src4 = load4pix(pSrcV, uvx, uvy, BLK_SIZE_UV, srcVoffset);
+            ref4 = load4pix(pRefV, uvx, uvy, nPitchV,     refVoffset);
+            sad = __vabsdiff4(src4, ref4, sad);
+        }
+    } else {
+      // UVは8x8
+      int uvx = wi % BLK_SIZE_UV;
+      int uvy = wi / BLK_SIZE_UV;
+      for (int t = 0; t < HALF_UV; ++t, uvy += 2) { // 4回ループ
+        sad = __sad(pSrcU[uvx + uvy * BLK_SIZE_UV], pRefU[uvx + uvy * nPitchU], sad);
+        sad = __sad(pSrcV[uvx + uvy * BLK_SIZE_UV], pRefV[uvx + uvy * nPitchV], sad);
+      }
     }
   }
   dev_reduce_warp<int, BLK_SIZE, AddReducer<int>>(wi, sad);
