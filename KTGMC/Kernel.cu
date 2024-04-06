@@ -235,13 +235,16 @@ double GaussianFilter::f(double value) {
 
 template <typename vpixel_t, int filter_size>
 __global__ void kl_resample_v(
-  const vpixel_t* __restrict__ src, vpixel_t* dst,
+  const vpixel_t* __restrict__ src0, const vpixel_t* __restrict__ src1,
+  vpixel_t* dst0, vpixel_t* dst1,
   int src_pitch4, int dst_pitch4,
   int width4, int height,
   const int* __restrict__ offset, const float* __restrict__ coef)
 {
   int x = threadIdx.x + blockIdx.x * blockDim.x;
   int y = threadIdx.y + blockIdx.y * blockDim.y;
+  const vpixel_t* __restrict__ src = (blockIdx.z) ? src1 : src0;
+  vpixel_t* dst = (blockIdx.z) ? dst1 : dst0;
 
   if (x < width4 && y < height) {
     int begin = offset[y];
@@ -261,15 +264,15 @@ __global__ void kl_resample_v(
 
 template <typename vpixel_t, int filter_size>
 void launch_resmaple_v(
-  const vpixel_t* src, vpixel_t* dst,
+  const vpixel_t* src0, const vpixel_t* src1, vpixel_t* dst0, vpixel_t* dst1,
   int src_pitch4, int dst_pitch4,
   int width4, int height,
   const int* offset, const float* coef, cudaStream_t stream)
 {
   dim3 threads(32, 16);
-  dim3 blocks(nblocks(width4, threads.x), nblocks(height, threads.y));
+  dim3 blocks(nblocks(width4, threads.x), nblocks(height, threads.y), src1 && dst1 ? 2 : 1);
   kl_resample_v<vpixel_t, filter_size> << <blocks, threads, 0, stream >> > (
-    src, dst, src_pitch4, dst_pitch4, width4, height, offset, coef);
+    src0, src1, dst0, dst1, src_pitch4, dst_pitch4, width4, height, offset, coef);
 }
 
 enum {
@@ -279,7 +282,8 @@ enum {
 
 template <typename pixel_t, int filter_size>
 __global__ void kl_resample_h(
-  const pixel_t* __restrict__ src, pixel_t* dst,
+  const pixel_t* __restrict__ src0, const pixel_t* __restrict__ src1,
+  pixel_t* dst0, pixel_t* dst1,
   int src_pitch, int dst_pitch,
   int width, int height,
   const int* __restrict__ offset, const float* __restrict__ coef)
@@ -289,6 +293,9 @@ __global__ void kl_resample_h(
     COEF_BUF_LEN = RESAMPLE_H_W * 4 * filter_size,
     N_READ_LOOP = COEF_BUF_LEN / THREADS
   };
+
+  const pixel_t* __restrict__ src = (blockIdx.z) ? src1 : src0;
+  pixel_t* dst = (blockIdx.z) ? dst1 : dst0;
 
   int tx = threadIdx.x;
   int ty = threadIdx.y;
@@ -374,15 +381,15 @@ __global__ void kl_resample_h(
 
 template <typename pixel_t, int filter_size>
 void launch_resmaple_h(
-  const pixel_t* src, pixel_t* dst,
+  const pixel_t* src0, const pixel_t* src1, pixel_t* dst0, pixel_t* dst1,
   int src_pitch, int dst_pitch,
   int width, int height,
   const int* offset, const float* coef, cudaStream_t stream)
 {
   dim3 threads(RESAMPLE_H_W, RESAMPLE_H_H);
-  dim3 blocks(nblocks(width / 4, threads.x), nblocks(height, threads.y));
+  dim3 blocks(nblocks(width / 4, threads.x), nblocks(height, threads.y), src1 && dst1 ? 2 : 1);
   kl_resample_h<pixel_t, filter_size> << <blocks, threads, 0, stream >> > (
-    src, dst, src_pitch, dst_pitch, width, height, offset, coef);
+    src0, src1, dst0, dst1, src_pitch, dst_pitch, width, height, offset, coef);
 }
 
 #pragma endregion
@@ -411,15 +418,22 @@ class KTGMC_Bob : public CUDAFilterBase {
 
     const int planes[] = { PLANAR_Y, PLANAR_U, PLANAR_V };
 
-    for (int p = 0; p < 3; ++p) {
+    auto planeEvent = CreateEventPlanes();
+
+    const bool uvSamePitch = src->GetPitch(PLANAR_U) == src->GetPitch(PLANAR_V);
+
+    for (int p = 0; p < (uvSamePitch ? 2 : 3); ++p) {
       const vpixel_t* srcptr = reinterpret_cast<const vpixel_t*>(src->GetReadPtr(planes[p]));
+      const vpixel_t* srcptr1 = (p > 0 && uvSamePitch) ? reinterpret_cast<const vpixel_t*>(src->GetReadPtr(planes[p+1])) : nullptr;
       int src_pitch4 = src->GetPitch(planes[p]) / sizeof(pixel_t) / 4;
 
       // separate field
       srcptr += top ? 0 : src_pitch4;
+      srcptr1 += top ? 0 : src_pitch4;
       src_pitch4 *= 2;
 
       vpixel_t* dstptr = reinterpret_cast<vpixel_t*>(dst->GetWritePtr(planes[p]));
+      vpixel_t* dstptr1 = (p > 0 && uvSamePitch) ? reinterpret_cast<vpixel_t*>(dst->GetWritePtr(planes[p+1])) : nullptr;
       int dst_pitch4 = dst->GetPitch(planes[p]) / sizeof(pixel_t) / 4;
 
       ResamplingProgram* prog = (p == 0) ? program_y : program_uv;
@@ -433,11 +447,12 @@ class KTGMC_Bob : public CUDAFilterBase {
       }
 
       launch_resmaple_v<vpixel_t, 4>(
-        srcptr, dstptr, src_pitch4, dst_pitch4, width4, height,
+        srcptr, srcptr1, dstptr, dstptr1, src_pitch4, dst_pitch4, width4, height,
         prog->pixel_offset->GetData(env), prog->pixel_coefficient_float->GetData(env), stream);
 
       DEBUG_SYNC;
     }
+    if (planeEvent) planeEvent->finPlane();
   }
 
   void MakeFrame(bool top, PVideoFrame& src, PVideoFrame& dst,
@@ -551,9 +566,25 @@ __global__ void kl_init_sad(float *sad)
 }
 
 template <typename vpixel_t>
-__global__ void kl_calculate_sad(const vpixel_t* pA, const vpixel_t* pB, int width4, int height, int pitch4, float* sad)
+__global__ void kl_calculate_sad(
+    const vpixel_t* pSrcA, const vpixel_t* pSrcB,
+    const vpixel_t* pPrv1A, const vpixel_t* pPrv1B,
+    const vpixel_t* pFwd1A, const vpixel_t* pFwd1B,
+    const vpixel_t* pPrv2A, const vpixel_t* pPrv2B,
+    const vpixel_t* pFwd2A, const vpixel_t* pFwd2B,
+    int width4, int height, int pitch4,
+    float* sad0, float* sad1)
 {
   int y = blockIdx.x;
+  const vpixel_t* pA = (blockIdx.z) ? pSrcB : pSrcA;
+  const vpixel_t* pB = nullptr;
+  switch (blockIdx.y) {
+  case 0: pB = (blockIdx.z) ? pPrv1B : pPrv1A; break;
+  case 1: pB = (blockIdx.z) ? pFwd1B : pFwd1A; break;
+  case 2: pB = (blockIdx.z) ? pPrv2B : pPrv2A; break;
+  case 3: pB = (blockIdx.z) ? pFwd2B : pFwd2A; break;
+  }
+  float *sad = ((blockIdx.z) ? sad1 : sad0) + blockIdx.y;
 
   float tmpsad = 0;
   for (int x = threadIdx.x; x < width4; x += blockDim.x) {
@@ -571,12 +602,21 @@ __global__ void kl_calculate_sad(const vpixel_t* pA, const vpixel_t* pB, int wid
 
 template <typename vpixel_t>
 __global__ void kl_binomial_temporal_soften_1(
-  vpixel_t* pDst, const vpixel_t* __restrict__ pSrc,
-  const vpixel_t* __restrict__ pRef0, const vpixel_t* __restrict__ pRef1,
-  const float* __restrict__ sad, float scenechange, int width4, int height, int pitch4)
+  vpixel_t* pDstA, vpixel_t* pDstB,
+  const vpixel_t* __restrict__ pSrcA, const vpixel_t* __restrict__ pSrcB,
+  const vpixel_t* __restrict__ pRef0A, const vpixel_t* __restrict__ pRef0B,
+  const vpixel_t* __restrict__ pRef1A, const vpixel_t* __restrict__ pRef1B,
+  const float* __restrict__ sadA, const float* __restrict__ sadB,
+  float scenechange, int width4, int height, int pitch4)
 {
   int x = threadIdx.x + blockIdx.x * blockDim.x;
   int y = threadIdx.y + blockIdx.y * blockDim.y;
+
+  const vpixel_t* __restrict__ pSrc  = (blockIdx.z) ? pSrcB : pSrcA;
+  vpixel_t*                    pDst  = (blockIdx.z) ? pDstB : pDstA;
+  const vpixel_t* __restrict__ pRef0 = (blockIdx.z) ? pRef0B : pRef0A;
+  const vpixel_t* __restrict__ pRef1 = (blockIdx.z) ? pRef1B : pRef1A;
+  const float*    __restrict__ sad   = (blockIdx.z) ? sadB : sadA;
 
   __shared__ bool isSC[2];
   if (threadIdx.x < 2 && threadIdx.y == 0) {
@@ -597,13 +637,25 @@ __global__ void kl_binomial_temporal_soften_1(
 
 template <typename vpixel_t>
 __global__ void kl_binomial_temporal_soften_2(
-  vpixel_t* pDst, const vpixel_t* __restrict__ pSrc,
-  const vpixel_t* __restrict__ pRef0, const vpixel_t* __restrict__ pRef1,
-  const vpixel_t* __restrict__ pRef2, const vpixel_t* __restrict__ pRef3,
-  const float* __restrict__ sad, float scenechange, int width4, int height, int pitch4)
+  vpixel_t* pDstA, vpixel_t* pDstB,
+  const vpixel_t* __restrict__ pSrcA, const vpixel_t* __restrict__ pSrcB,
+  const vpixel_t* __restrict__ pRef0A, const vpixel_t* __restrict__ pRef0B,
+  const vpixel_t* __restrict__ pRef1A, const vpixel_t* __restrict__ pRef1B,
+  const vpixel_t* __restrict__ pRef2A, const vpixel_t* __restrict__ pRef2B,
+  const vpixel_t* __restrict__ pRef3A, const vpixel_t* __restrict__ pRef3B,
+  const float* __restrict__ sadA, const float* __restrict__ sadB,
+  float scenechange, int width4, int height, int pitch4)
 {
   int x = threadIdx.x + blockIdx.x * blockDim.x;
   int y = threadIdx.y + blockIdx.y * blockDim.y;
+
+  const vpixel_t* __restrict__ pSrc = (blockIdx.z) ? pSrcB : pSrcA;
+  vpixel_t*                    pDst = (blockIdx.z) ? pDstB : pDstA;
+  const vpixel_t* __restrict__ pRef0 = (blockIdx.z) ? pRef0B : pRef0A;
+  const vpixel_t* __restrict__ pRef1 = (blockIdx.z) ? pRef1B : pRef1A;
+  const vpixel_t* __restrict__ pRef2 = (blockIdx.z) ? pRef2B : pRef2A;
+  const vpixel_t* __restrict__ pRef3 = (blockIdx.z) ? pRef3B : pRef3A;
+  const float*    __restrict__ sad   = (blockIdx.z) ? sadB : sadA;
 
   __shared__ bool isSC[4];
   if (threadIdx.x < 4 && threadIdx.y == 0) {
@@ -671,14 +723,18 @@ class KBinomialTemporalSoften : public CUDAFilterBase {
     kl_init_sad << <1, radius * 2 * 3, 0, stream >> > (sad);
     DEBUG_SYNC;
 
+    const bool uvSamePitch = src->GetPitch(PLANAR_U) == src->GetPitch(PLANAR_V);
+
     auto planeEvent = CreateEventPlanes();
 
     int planes[] = { PLANAR_Y, PLANAR_U, PLANAR_V };
-    for (int p = 0; p < 3; ++p) {
+    for (int p = 0; p < ((uvSamePitch && chroma) ? 2 : 3); ++p) {
 
       const auto planeStream = (cudaStream_t)GetDeviceStreamPlane(p);
-      const vpixel_t* pSrc = reinterpret_cast<const vpixel_t*>(src->GetReadPtr(planes[p]));
-      vpixel_t* pDst = reinterpret_cast<vpixel_t*>(dst->GetWritePtr(planes[p]));
+      const vpixel_t* pSrcA = (const vpixel_t*)(src->GetReadPtr(planes[p]));
+      const vpixel_t* pSrcB = (p > 0 && uvSamePitch) ? (const vpixel_t*)(src->GetReadPtr(planes[p + 1])) : nullptr;
+      vpixel_t* pDstA = reinterpret_cast<vpixel_t*>(dst->GetWritePtr(planes[p]));
+      vpixel_t* pDstB = (p > 0 && uvSamePitch) ? reinterpret_cast<vpixel_t*>(dst->GetWritePtr(planes[p + 1])) : nullptr;
 
       int pitch = src->GetPitch(planes[p]) / sizeof(pixel_t);
       int width = vi.width;
@@ -693,31 +749,25 @@ class KBinomialTemporalSoften : public CUDAFilterBase {
       int pitch4 = pitch >> 2;
 
       if (chroma == false && p > 0) {
-        launch_elementwise<vpixel_t, vpixel_t, CopyFunction<vpixel_t>>(pDst, pSrc, width4, height, pitch4, planeStream);
+        cudaMemcpy2DAsync(pDstA, pitch * sizeof(pixel_t), pSrcA, pitch * sizeof(pixel_t), width * sizeof(pixel_t), height, cudaMemcpyDeviceToDevice, planeStream);
         DEBUG_SYNC;
         continue;
       }
 
-      const vpixel_t* pPrv1 = reinterpret_cast<const vpixel_t*>(prv1->GetReadPtr(planes[p]));
-      const vpixel_t* pFwd1 = reinterpret_cast<const vpixel_t*>(fwd1->GetReadPtr(planes[p]));
-      const vpixel_t* pPrv2;
-      const vpixel_t* pFwd2;
+      const vpixel_t* pPrv1A = (const vpixel_t*)(prv1->GetReadPtr(planes[p]));
+      const vpixel_t* pFwd1A = (const vpixel_t*)(fwd1->GetReadPtr(planes[p]));
+      const vpixel_t* pPrv2A = (radius >= 2) ? (const vpixel_t*)(prv2->GetReadPtr(planes[p])) : nullptr;
+      const vpixel_t* pFwd2A = (radius >= 2) ? (const vpixel_t*)(fwd2->GetReadPtr(planes[p])) : nullptr;
+      const vpixel_t* pPrv1B = (p > 0 && uvSamePitch) ? (const vpixel_t*)(prv1->GetReadPtr(planes[p + 1])) : nullptr;
+      const vpixel_t* pFwd1B = (p > 0 && uvSamePitch) ? (const vpixel_t*)(fwd1->GetReadPtr(planes[p + 1])) : nullptr;
+      const vpixel_t* pPrv2B = (radius >= 2 && p > 0 && uvSamePitch) ? (const vpixel_t*)(prv2->GetReadPtr(planes[p + 1])) : nullptr;
+      const vpixel_t* pFwd2B = (radius >= 2 && p > 0 && uvSamePitch) ? (const vpixel_t*)(fwd2->GetReadPtr(planes[p + 1])) : nullptr;
 
-      float* pSad = sad + p * radius * 2;
-      kl_calculate_sad << <height, CALC_SAD_THREADS, 0, planeStream >> > (pSrc, pPrv1, width4, height, pitch4, &pSad[0]);
+      float* pSadA = sad + p * radius * 2;
+      float* pSadB = sad + (p+1) * radius * 2;
+      dim3 sadblocks(height, radius * 2, (p > 0 && uvSamePitch) ? 2 : 1);
+      kl_calculate_sad << <sadblocks, CALC_SAD_THREADS, 0, planeStream >> > (pSrcA, pSrcB, pPrv1A, pPrv1B, pFwd1A, pFwd1B, pPrv2A, pPrv2B, pFwd2A, pFwd2B, width4, height, pitch4, pSadA, pSadB);
       DEBUG_SYNC;
-      kl_calculate_sad << <height, CALC_SAD_THREADS, 0, planeStream >> > (pSrc, pFwd1, width4, height, pitch4, &pSad[1]);
-      DEBUG_SYNC;
-
-      if (radius >= 2) {
-        pPrv2 = reinterpret_cast<const vpixel_t*>(prv2->GetReadPtr(planes[p]));
-        pFwd2 = reinterpret_cast<const vpixel_t*>(fwd2->GetReadPtr(planes[p]));
-
-        kl_calculate_sad << <height, CALC_SAD_THREADS, 0, planeStream >> > (pSrc, pPrv2, width4, height, pitch4, &pSad[2]);
-        DEBUG_SYNC;
-        kl_calculate_sad << <height, CALC_SAD_THREADS, 0, planeStream >> > (pSrc, pFwd2, width4, height, pitch4, &pSad[3]);
-        DEBUG_SYNC;
-      }
 
       //DataDebug<float> dsad(pSad, 2, env);
       //dsad.Show();
@@ -726,17 +776,17 @@ class KBinomialTemporalSoften : public CUDAFilterBase {
       float fsc = (float)scenechange * width * height;
 
       dim3 threads(32, 16);
-      dim3 blocks(nblocks(width4, threads.x), nblocks(height, threads.y));
+      dim3 blocks(nblocks(width4, threads.x), nblocks(height, threads.y), (p > 0 && uvSamePitch) ? 2 : 1);
 
       switch (radius) {
       case 1:
         kl_binomial_temporal_soften_1 << <blocks, threads, 0, planeStream >> > (
-          pDst, pSrc, pPrv1, pFwd1, pSad, fsc, width4, height, pitch4);
+          pDstA, pDstB, pSrcA, pSrcB, pPrv1A, pPrv1B, pFwd1A, pFwd1B, pSadA, pSadB, fsc, width4, height, pitch4);
         DEBUG_SYNC;
         break;
       case 2:
         kl_binomial_temporal_soften_2 << <blocks, threads, 0, planeStream >> > (
-          pDst, pSrc, pPrv1, pFwd1, pPrv2, pFwd2, pSad, fsc, width4, height, pitch4);
+          pDstA, pDstB, pSrcA, pSrcB, pPrv1A, pPrv1B, pFwd1A, pFwd1B, pPrv2A, pPrv2B, pFwd2A, pFwd2B, pSadA, pSadB, fsc, width4, height, pitch4);
         DEBUG_SYNC;
         break;
       }
@@ -834,7 +884,9 @@ __global__ void kl_copy_boarder1_v(
 
 template <typename pixel_t, typename Horizontal, typename Vertical>
 __global__ void kl_box3x3_filter(
-  pixel_t* pDst, const pixel_t* __restrict__ pSrc, int width, int height, int pitch
+  pixel_t* pDstA, pixel_t* pDstB,
+  const pixel_t* __restrict__ pSrcA, const pixel_t* __restrict__ pSrcB,
+  int width, int height, int pitch
 )
 {
   Horizontal horizontal;
@@ -842,6 +894,8 @@ __global__ void kl_box3x3_filter(
 
   const int x = threadIdx.x + blockDim.x * blockIdx.x;
   const int y = threadIdx.y + blockDim.y * blockIdx.y;
+  pixel_t* pDst = (blockIdx.z) ? pDstB : pDstA;
+  const pixel_t* __restrict__ pSrc = (blockIdx.z) ? pSrcB : pSrcA;
 
   if (x < width && y < height) {
       const int s = pSrc[x + y * pitch];
@@ -962,10 +1016,14 @@ struct IntCompareAndSwap {
 
 template <typename pixel_t, int N>
 __global__ void kl_rg_clip(
-  pixel_t* pDst, const pixel_t* __restrict__ pSrc, int width, int height, int pitch)
+  pixel_t* pDstA, pixel_t* pDstB,
+  const pixel_t* __restrict__ pSrcA, const pixel_t* __restrict__ pSrcB,
+  int width, int height, int pitch)
 {
   const int x = threadIdx.x + blockDim.x * blockIdx.x;
   const int y = threadIdx.y + blockDim.y * blockIdx.y;
+  pixel_t* pDst = (blockIdx.z) ? pDstB : pDstA;
+  const pixel_t* __restrict__ pSrc = (blockIdx.z) ? pSrcB : pSrcA;
   if (x < width && y < height) {
     const int s = pSrc[x + y * pitch];
     int tmp = s;
@@ -1002,40 +1060,47 @@ __global__ void kl_rg_clip(
 
 template <typename pixel_t, int N>
 __global__ void kl_repair_clip(
-  pixel_t* pDst, const pixel_t* __restrict__ pSrc,
-  const pixel_t* __restrict__ pRef, int width, int height, int pitch)
+  pixel_t* pDstA, pixel_t* pDstB,
+  const pixel_t* __restrict__ pSrcA, const pixel_t* __restrict__ pSrcB,
+  const pixel_t* __restrict__ pRefA, const pixel_t* __restrict__ pRefB,
+  int width, int height, int pitch)
 {
-  int x = threadIdx.x + blockDim.x * blockIdx.x;
-  int y = threadIdx.y + blockDim.y * blockIdx.y;
+  const int x = threadIdx.x + blockDim.x * blockIdx.x;
+  const int y = threadIdx.y + blockDim.y * blockIdx.y;
+  pixel_t* pDst = (blockIdx.z) ? pDstB : pDstA;
+  const pixel_t* __restrict__ pSrc = (blockIdx.z) ? pSrcB : pSrcA;
+  const pixel_t* __restrict__ pRef = (blockIdx.z) ? pRefB : pRefA;
 
   if (x < width && y < height) {
-    int a0 = pRef[x - 1 + (y - 1) * pitch];
-    int a1 = pRef[x + (y - 1) * pitch];
-    int a2 = pRef[x + 1 + (y - 1) * pitch];
-    int a3 = pRef[x - 1 + y * pitch];
-    int a4 = pRef[x + y * pitch];
-    int a5 = pRef[x + 1 + y * pitch];
-    int a6 = pRef[x - 1 + (y + 1) * pitch];
-    int a7 = pRef[x + (y + 1) * pitch];
-    int a8 = pRef[x + 1 + (y + 1) * pitch];
+    const int s = pSrc[x + y * pitch];
+    int tmp = s;
+    if (1 <= x && x < width - 1 && 1 <= y && y < height - 1) {
+        int a0 = pRef[x - 1 + (y - 1) * pitch];
+        int a1 = pRef[x + (y - 1) * pitch];
+        int a2 = pRef[x + 1 + (y - 1) * pitch];
+        int a3 = pRef[x - 1 + y * pitch];
+        int a4 = s;
+        int a5 = pRef[x + 1 + y * pitch];
+        int a6 = pRef[x - 1 + (y + 1) * pitch];
+        int a7 = pRef[x + (y + 1) * pitch];
+        int a8 = pRef[x + 1 + (y + 1) * pitch];
 
-    dev_sort_9elem<int, IntCompareAndSwap>(a0, a1, a2, a3, a4, a5, a6, a7, a8);
+        dev_sort_9elem<int, IntCompareAndSwap>(a0, a1, a2, a3, a4, a5, a6, a7, a8);
 
-    int s = pSrc[x + y * pitch];
-    int tmp;
-    switch (N) {
-    case 1: // 1st
-      tmp = clamp(s, a0, a8);
-      break;
-    case 2: // 2nd
-      tmp = clamp(s, a1, a7);
-      break;
-    case 3: // 3rd
-      tmp = clamp(s, a2, a6);
-      break;
-    case 4: // 4th
-      tmp = clamp(s, a3, a5);
-      break;
+        switch (N) {
+        case 1: // 1st
+            tmp = clamp(s, a0, a8);
+            break;
+        case 2: // 2nd
+            tmp = clamp(s, a1, a7);
+            break;
+        case 3: // 3rd
+            tmp = clamp(s, a2, a6);
+            break;
+        case 4: // 4th
+            tmp = clamp(s, a3, a5);
+            break;
+        }
     }
     pDst[x + y * pitch] = tmp;
   }
@@ -1064,13 +1129,17 @@ class KRemoveGrain : public CUDAFilterBase {
 
     auto planeEvent = CreateEventPlanes();
 
-    for (int p = 0; p < 3; ++p) {
+    const bool uvSamePitch = src->GetPitch(PLANAR_U) == src->GetPitch(PLANAR_V);
+
+    for (int p = 0; p < ((uvSamePitch && modeU > 0 && modeV > 0) ? 2 : 3); p++) {
       int mode = modes[p];
       if (mode == -1) continue;
 
       const auto planeStream = (cudaStream_t)GetDeviceStreamPlane(p);
       const pixel_t* pSrc = reinterpret_cast<const pixel_t*>(src->GetReadPtr(planes[p]));
+      const pixel_t* pSrc1 = (p > 0 && uvSamePitch) ? reinterpret_cast<const pixel_t*>(src->GetReadPtr(planes[p + 1])) : nullptr;
       pixel_t* pDst = reinterpret_cast<pixel_t*>(dst->GetWritePtr(planes[p]));
+      pixel_t* pDst1 = (p > 0 && uvSamePitch) ? reinterpret_cast<pixel_t*>(dst->GetWritePtr(planes[p + 1])) : nullptr;
 
       int pitch = src->GetPitch(planes[p]) / sizeof(pixel_t);
       int width = vi.width;
@@ -1085,66 +1154,59 @@ class KRemoveGrain : public CUDAFilterBase {
       int pitch4 = pitch >> 2;
 
       if (mode == 0) {
-        launch_elementwise<vpixel_t, vpixel_t, CopyFunction<vpixel_t>>(
-          (vpixel_t*)pDst, (const vpixel_t*)pSrc, width4, height, pitch4, planeStream);
+        //launch_elementwise<vpixel_t, vpixel_t, CopyFunction<vpixel_t>>(
+        //  (vpixel_t*)pDst, (const vpixel_t*)pSrc, width4, height, pitch4, planeStream);
+        cudaMemcpy2DAsync(pDst, pitch * sizeof(pixel_t), pSrc, pitch * sizeof(pixel_t), width * sizeof(pixel_t), height, cudaMemcpyDeviceToDevice, planeStream);
         DEBUG_SYNC;
         continue;
       }
 
       dim3 threads(32, 16);
-      dim3 blocks(nblocks(width, threads.x), nblocks(height, threads.y));
+      dim3 blocks(nblocks(width, threads.x), nblocks(height, threads.y), (p > 0 && uvSamePitch) ? 2 : 1);
 
       switch (mode) {
       case 1:
         // Clips the pixel with the minimum and maximum of the 8 neighbour pixels.
         kl_rg_clip<pixel_t, 1>
-          << <blocks, threads, 0, planeStream >> > (pDst, pSrc, width, height, pitch);
+          << <blocks, threads, 0, planeStream >> > (pDst, pDst1, pSrc, pSrc1, width, height, pitch);
         DEBUG_SYNC;
         break;
       case 2:
         // Clips the pixel with the second minimum and maximum of the 8 neighbour pixels
         kl_rg_clip<pixel_t, 2>
-          << <blocks, threads, 0, planeStream >> > (pDst, pSrc, width, height, pitch);
+          << <blocks, threads, 0, planeStream >> > (pDst, pDst1, pSrc, pSrc1, width, height, pitch);
         DEBUG_SYNC;
         break;
       case 3:
         // Clips the pixel with the third minimum and maximum of the 8 neighbour pixels.
         kl_rg_clip<pixel_t, 3>
-          << <blocks, threads, 0, planeStream >> > (pDst, pSrc, width, height, pitch);
+          << <blocks, threads, 0, planeStream >> > (pDst, pDst1, pSrc, pSrc1, width, height, pitch);
         DEBUG_SYNC;
         break;
       case 4:
         // Clips the pixel with the fourth minimum and maximum of the 8 neighbour pixels, which is equivalent to a median filter.
         kl_rg_clip<pixel_t, 4>
-          << <blocks, threads, 0, planeStream >> > (pDst, pSrc, width, height, pitch);
+          << <blocks, threads, 0, planeStream >> > (pDst, pDst1, pSrc, pSrc1, width, height, pitch);
         DEBUG_SYNC;
         break;
       case 11:
       case 12:
         // [1 2 1] horizontal and vertical kernel blur
         kl_box3x3_filter<pixel_t, RG11Horizontal, RG11Vertical>
-          << <blocks, threads, 0, planeStream >> > (pDst, pSrc, width, height, pitch);
+          << <blocks, threads, 0, planeStream >> > (pDst, pDst1, pSrc, pSrc1, width, height, pitch);
         DEBUG_SYNC;
         break;
 
       case 20:
         // Averages the 9 pixels ([1 1 1] horizontal and vertical blur)
         kl_box3x3_filter<pixel_t, RG20Horizontal, RG20Vertical>
-          << <blocks, threads, 0, planeStream >> > (pDst, pSrc, width, height, pitch);
+          << <blocks, threads, 0, planeStream >> > (pDst, pDst1, pSrc, pSrc1, width, height, pitch);
         DEBUG_SYNC;
         break;
 
       default:
         env->ThrowError("[KRemoveGrain] Unsupported mode %d", modes[p]);
       }
-#if 0
-      {
-        dim3 threads(256);
-        dim3 blocks(nblocks(max(height, width), threads.x), 4);
-        kl_copy_boarder1 << <blocks, threads, 0, planeStream >> > (pDst, pSrc, width, height, pitch);
-        DEBUG_SYNC;
-      }
-#endif
     }
     if (planeEvent) planeEvent->finPlane();
 
@@ -1239,14 +1301,19 @@ class KRepair : public CUDAFilterBase {
     int modes[] = { mode, modeU, modeV };
     auto planeEvent = CreateEventPlanes();
 
-    for (int p = 0; p < 3; ++p) {
+    const bool uvSamePitch = src->GetPitch(PLANAR_U) == src->GetPitch(PLANAR_V);
+
+    for (int p = 0; p < ((uvSamePitch && modeU > 0 && modeV > 0) ? 2 : 3); p++) {
       int mode = modes[p];
       if (mode == -1) continue;
 
       const auto planeStream = (cudaStream_t)GetDeviceStreamPlane(p);
       const pixel_t* pSrc = reinterpret_cast<const pixel_t*>(src->GetReadPtr(planes[p]));
+      const pixel_t* pSrc1 = (p > 0 && uvSamePitch) ? reinterpret_cast<const pixel_t*>(src->GetReadPtr(planes[p + 1])) : nullptr;
       const pixel_t* pRef = reinterpret_cast<const pixel_t*>(ref->GetReadPtr(planes[p]));
+      const pixel_t* pRef1 = (p > 0 && uvSamePitch) ? reinterpret_cast<const pixel_t*>(ref->GetReadPtr(planes[p + 1])) : nullptr;
       pixel_t* pDst = reinterpret_cast<pixel_t*>(dst->GetWritePtr(planes[p]));
+      pixel_t* pDst1 = (p > 0 && uvSamePitch) ? reinterpret_cast<pixel_t*>(dst->GetWritePtr(planes[p + 1])) : nullptr;
 
       int pitch = src->GetPitch(planes[p]) / sizeof(pixel_t);
       int width = vi.width;
@@ -1261,52 +1328,45 @@ class KRepair : public CUDAFilterBase {
       int pitch4 = pitch >> 2;
 
       if (mode == 0) {
-        launch_elementwise<vpixel_t, vpixel_t, CopyFunction<vpixel_t>>(
-          (vpixel_t*)pDst, (const vpixel_t*)pSrc, width4, height, pitch4, planeStream);
+        //launch_elementwise<vpixel_t, vpixel_t, CopyFunction<vpixel_t>>(
+        //  (vpixel_t*)pDst, (const vpixel_t*)pSrc, width4, height, pitch4, planeStream);
+        cudaMemcpy2DAsync(pDst, pitch * sizeof(pixel_t), pSrc, pitch * sizeof(pixel_t), width * sizeof(pixel_t), height, cudaMemcpyDeviceToDevice, planeStream);
         DEBUG_SYNC;
         continue;
       }
 
       dim3 threads(32, 16);
-      dim3 blocks(nblocks(width - 2, threads.x), nblocks(height - 2, threads.y));
+      dim3 blocks(nblocks(width, threads.x), nblocks(height, threads.y), (p > 0 && uvSamePitch) ? 2 : 1);
 
       switch (mode) {
       case 1:
         // Clips the source pixel with the Nth minimum and maximum found on the 3Å~3-pixel square from the reference clip.
         kl_repair_clip<pixel_t, 1>
-          << <blocks, threads, 0, planeStream >> > (pDst + pitch + 1, pSrc + pitch + 1, pRef + pitch + 1, width - 2, height - 2, pitch);
+          << <blocks, threads, 0, planeStream >> > (pDst, pDst1, pSrc, pSrc1, pRef, pRef1, width, height, pitch);
         DEBUG_SYNC;
         break;
       case 2:
         // Clips the source pixel with the Nth minimum and maximum found on the 3Å~3-pixel square from the reference clip.
         kl_repair_clip<pixel_t, 2>
-          << <blocks, threads, 0, planeStream >> > (pDst + pitch + 1, pSrc + pitch + 1, pRef + pitch + 1, width - 2, height - 2, pitch);
+          << <blocks, threads, 0, planeStream >> > (pDst, pDst1, pSrc, pSrc1, pRef, pRef1, width, height, pitch);
         DEBUG_SYNC;
         break;
       case 3:
         // Clips the source pixel with the Nth minimum and maximum found on the 3Å~3-pixel square from the reference clip.
         kl_repair_clip<pixel_t, 3>
-          << <blocks, threads, 0, planeStream >> > (pDst + pitch + 1, pSrc + pitch + 1, pRef + pitch + 1, width - 2, height - 2, pitch);
+          << <blocks, threads, 0, planeStream >> > (pDst, pDst1, pSrc, pSrc1, pRef, pRef1, width, height, pitch);
         DEBUG_SYNC;
         break;
       case 4:
         // Clips the source pixel with the Nth minimum and maximum found on the 3Å~3-pixel square from the reference clip.
         kl_repair_clip<pixel_t, 4>
-          << <blocks, threads, 0, planeStream >> > (pDst + pitch + 1, pSrc + pitch + 1, pRef + pitch + 1, width - 2, height - 2, pitch);
+          << <blocks, threads, 0, planeStream >> > (pDst, pDst1, pSrc, pSrc1, pRef, pRef1, width, height, pitch);
         DEBUG_SYNC;
         break;
 
       default:
         env->ThrowError("[KRepair] Unsupported mode %d", modes[p]);
       }
-
-      {
-        dim3 threads(256);
-        dim3 blocks(nblocks(max(height, width), threads.x), 4);
-        kl_copy_boarder1 << <blocks, threads, 0, planeStream >> > (pDst, pSrc, width, height, pitch);
-        DEBUG_SYNC;
-      }
-
     }
     if (planeEvent) planeEvent->finPlane();
 
@@ -1377,11 +1437,15 @@ public:
 
 template <typename vpixel_t>
 __global__ void kl_vertical_cleaner_median(
-  vpixel_t* dst, const vpixel_t* __restrict__ pSrc, int width4, int height, int pitch4
+  vpixel_t* dst0, vpixel_t* dst1,
+  const vpixel_t* __restrict__ pSrc0, const vpixel_t* __restrict__ pSrc1,
+  int width4, int height, int pitch4
 )
 {
   const int x = threadIdx.x + blockIdx.x * blockDim.x;
   const int y = threadIdx.y + blockIdx.y * blockDim.y;
+  vpixel_t* dst = (blockIdx.z) ? dst1 : dst0;
+  const vpixel_t* __restrict__ pSrc = (blockIdx.z) ? pSrc1 : pSrc0;
 
   if (x < width4 && y < height) {
     int4 tmp = to_int(pSrc[x + y * pitch4]);
@@ -1418,13 +1482,17 @@ class KVerticalCleaner : public CUDAFilterBase {
 
     auto planeEvent = CreateEventPlanes();
 
-    for (int p = 0; p < 3; ++p) {
+    const bool uvSamePitch = src->GetPitch(PLANAR_U) == src->GetPitch(PLANAR_V);
+
+    for (int p = 0; p < ((uvSamePitch && modeU > 0 && modeV > 0) ? 2 : 3); p++) {
       int mode = modes[p];
       if (mode == -1) continue;
 
       const auto planeStream = (cudaStream_t)GetDeviceStreamPlane(p);
       const pixel_t* pSrc = reinterpret_cast<const pixel_t*>(src->GetReadPtr(planes[p]));
+      const pixel_t* pSrc1 = (p > 0 && uvSamePitch) ? reinterpret_cast<const pixel_t*>(src->GetReadPtr(planes[p + 1])) : nullptr;
       pixel_t* pDst = reinterpret_cast<pixel_t*>(dst->GetWritePtr(planes[p]));
+      pixel_t* pDst1 = (p > 0 && uvSamePitch) ? reinterpret_cast<pixel_t*>(dst->GetWritePtr(planes[p + 1])) : nullptr;
 
       int pitch = src->GetPitch(planes[p]) / sizeof(pixel_t);
       int width = vi.width;
@@ -1439,21 +1507,22 @@ class KVerticalCleaner : public CUDAFilterBase {
       int pitch4 = pitch >> 2;
 
       if (mode == 0) {
-        launch_elementwise<vpixel_t, vpixel_t, CopyFunction<vpixel_t>>(
-          (vpixel_t*)pDst, (const vpixel_t*)pSrc, width4, height, pitch4, planeStream);
+        //launch_elementwise<vpixel_t, vpixel_t, CopyFunction<vpixel_t>>(
+        //  (vpixel_t*)pDst, (const vpixel_t*)pSrc, width4, height, pitch4, planeStream);
+        cudaMemcpy2DAsync(pDst, pitch * sizeof(pixel_t), pSrc, pitch * sizeof(pixel_t), width * sizeof(pixel_t), height, cudaMemcpyDeviceToDevice, planeStream);
         DEBUG_SYNC;
         continue;
       }
 
       dim3 threads(32, 16);
-      dim3 blocks(nblocks(width4, threads.x), nblocks(height, threads.y));
+      dim3 blocks(nblocks(width4, threads.x), nblocks(height, threads.y), (p > 0 && uvSamePitch) ? 2 : 1);
 
       switch (mode) {
       case 1:
         // vertical median
         kl_vertical_cleaner_median<vpixel_t>
           << <blocks, threads, 0, planeStream >> > (
-          (vpixel_t*)(pDst), (const vpixel_t*)(pSrc), width4, height, pitch4);
+          (vpixel_t*)(pDst), (vpixel_t*)(pDst1), (const vpixel_t*)(pSrc), (const vpixel_t*)(pSrc1), width4, height, pitch4);
         DEBUG_SYNC;
         break;
 
@@ -1553,24 +1622,29 @@ class KGaussResize : public CUDAFilterBase {
     const int planes[] = { PLANAR_Y, PLANAR_U, PLANAR_V };
 
     typedef void(*RESAMPLE_V)(
-      const vpixel_t* src, vpixel_t* dst,
+        const vpixel_t* src0, const vpixel_t* src1, vpixel_t* dst0, vpixel_t* dst1,
       int src_pitch4, int dst_pitch4,
       int width4, int height,
       const int* offset, const float* coef, cudaStream_t);
 
     typedef void(*RESAMPLE_H)(
-      const pixel_t* src, pixel_t* dst,
+      const pixel_t* src0, const pixel_t* src1, pixel_t* dst0, pixel_t* dst1,
       int src_pitch, int dst_pitch,
       int width, int height,
       const int* offset, const float* coef, cudaStream_t);
 
     auto planeEvent = CreateEventPlanes();
 
-    for (int p = 0; p < (chroma ? 3 : 1); ++p) {
+    const bool uvSamePitch = src->GetPitch(PLANAR_U) == src->GetPitch(PLANAR_V);
+
+    for (int p = 0; p < (chroma ? (uvSamePitch ? 2 : 3) : 1); ++p) {
       const auto planeStream = (cudaStream_t)GetDeviceStreamPlane(p);
       const pixel_t* srcptr = reinterpret_cast<const pixel_t*>(src->GetReadPtr(planes[p]));
+      const pixel_t* srcptr1 = (p > 0 && uvSamePitch) ? reinterpret_cast<const pixel_t*>(src->GetReadPtr(planes[p + 1])) : nullptr;
       pixel_t* tmpptr = reinterpret_cast<pixel_t*>(tmp->GetWritePtr(planes[p]));
+      pixel_t* tmpptr1 = (p > 0 && uvSamePitch) ? reinterpret_cast<pixel_t*>(tmp->GetWritePtr(planes[p + 1])) : nullptr;
       pixel_t* dstptr = reinterpret_cast<pixel_t*>(dst->GetWritePtr(planes[p]));
+      pixel_t* dstptr1 = (p > 0 && uvSamePitch) ? reinterpret_cast<pixel_t*>(dst->GetWritePtr(planes[p + 1])) : nullptr;
 
       int pitch = src->GetPitch(planes[p]) / sizeof(pixel_t);
       int pitch4 = pitch / 4;
@@ -1615,12 +1689,12 @@ class KGaussResize : public CUDAFilterBase {
       }
 
       resample_v(
-        (const vpixel_t*)srcptr, (vpixel_t*)tmpptr, pitch4, pitch4, width4, height,
+        (const vpixel_t*)srcptr, (const vpixel_t*)srcptr1, (vpixel_t*)tmpptr, (vpixel_t*)tmpptr1, pitch4, pitch4, width4, height,
         progV->pixel_offset->GetData(env), progV->pixel_coefficient_float->GetData(env), planeStream);
       DEBUG_SYNC;
 
       resample_h(
-        tmpptr, dstptr, pitch, pitch, width, height,
+        tmpptr, tmpptr1, dstptr, dstptr1, pitch, pitch, width, height,
         progH->pixel_offset->GetData(env), progH->pixel_coefficient_float->GetData(env), planeStream);
       DEBUG_SYNC;
     }
@@ -1692,19 +1766,25 @@ protected:
   int logUVx;
   int logUVy;
 
-  virtual void ProcPlane(int p, uint8_t* pDst,
-    const uint8_t* pSrc0, const uint8_t* pSrc1, const uint8_t* pSrc2, const uint8_t* pSrc3,
+  virtual void ProcPlane(int p, uint8_t* pDstA, uint8_t* pDstB,
+    const uint8_t* pSrc0A, const uint8_t* pSrc0B,
+    const uint8_t* pSrc1A, const uint8_t* pSrc1B,
+    const uint8_t* pSrc2A, const uint8_t* pSrc2B,
+    const uint8_t* pSrc3A, const uint8_t* pSrc3B,
     int width, int height, int pitch, cudaStream_t stream) { }
 
-  virtual void ProcPlane(int p, uint16_t* pDst,
-    const uint16_t* pSrc0, const uint16_t* pSrc1, const uint16_t* pSrc2, const uint16_t* pSrc3,
+  virtual void ProcPlane(int p, uint16_t* pDstA, uint16_t* pDstB,
+    const uint16_t* pSrc0A, const uint16_t* pSrc0B,
+    const uint16_t* pSrc1A, const uint16_t* pSrc1B,
+    const uint16_t* pSrc2A, const uint16_t* pSrc2B,
+    const uint16_t* pSrc3A, const uint16_t* pSrc3B,
     int width, int height, int pitch, cudaStream_t stream) { }
 
   template <typename pixel_t>
   PVideoFrame Proc(int n, PNeoEnv env)
   {
     typedef typename VectorType<pixel_t>::type vpixel_t;
-		cudaStream_t stream = static_cast<cudaStream_t>(env->GetDeviceStream());
+	cudaStream_t stream = static_cast<cudaStream_t>(env->GetDeviceStream());
 
     PVideoFrame src0 = childs[0]->GetFrame(n, env);
     PVideoFrame src1 = (numChilds >= 2) ? childs[1]->GetFrame(n, env) : PVideoFrame();
@@ -1712,23 +1792,30 @@ protected:
     PVideoFrame src3 = (numChilds >= 4) ? childs[3]->GetFrame(n, env) : PVideoFrame();
     PVideoFrame dst = env->NewVideoFrame(vi);
 
-    int planes[] = { PLANAR_Y, PLANAR_U, PLANAR_V };
-    int modes[] = { Y, U, V };
+    const int planes[] = { PLANAR_Y, PLANAR_U, PLANAR_V };
+    const int modes[] = { Y, U, V };
 
     auto planeEvent = CreateEventPlanes();
 
-    for (int p = 0; p < 3; ++p) {
-      int mode = modes[p];
+    const bool uvSamePitch = src0->GetPitch(PLANAR_U) == src0->GetPitch(PLANAR_V);
+
+    for (int p = 0; p < (uvSamePitch && modes[1] >= 2 && modes[2] >= 2 ? 2 : 3); p++) {
+      const int mode = modes[p];
       if (mode == 1) continue;
 
       const auto planeStream = (cudaStream_t)GetDeviceStreamPlane(p);
-      const pixel_t* pSrc0 = reinterpret_cast<const pixel_t*>(src0->GetReadPtr(planes[p]));
-      const pixel_t* pSrc1 = (numChilds >= 2) ? reinterpret_cast<const pixel_t*>(src1->GetReadPtr(planes[p])) : nullptr;
-      const pixel_t* pSrc2 = (numChilds >= 3) ? reinterpret_cast<const pixel_t*>(src2->GetReadPtr(planes[p])) : nullptr;
-      const pixel_t* pSrc3 = (numChilds >= 4) ? reinterpret_cast<const pixel_t*>(src3->GetReadPtr(planes[p])) : nullptr;
-      pixel_t* pDst = reinterpret_cast<pixel_t*>(dst->GetWritePtr(planes[p]));
+      const pixel_t* pSrc0A =                    reinterpret_cast<const pixel_t*>(src0->GetReadPtr(planes[p]));
+      const pixel_t* pSrc1A = (numChilds >= 2) ? reinterpret_cast<const pixel_t*>(src1->GetReadPtr(planes[p])) : nullptr;
+      const pixel_t* pSrc2A = (numChilds >= 3) ? reinterpret_cast<const pixel_t*>(src2->GetReadPtr(planes[p])) : nullptr;
+      const pixel_t* pSrc3A = (numChilds >= 4) ? reinterpret_cast<const pixel_t*>(src3->GetReadPtr(planes[p])) : nullptr;
+      const pixel_t* pSrc0B = (                  p > 0 && uvSamePitch) ? reinterpret_cast<const pixel_t*>(src0->GetReadPtr(planes[p + 1])) : nullptr;
+      const pixel_t* pSrc1B = (numChilds >= 2 && p > 0 && uvSamePitch) ? reinterpret_cast<const pixel_t*>(src1->GetReadPtr(planes[p + 1])) : nullptr;
+      const pixel_t* pSrc2B = (numChilds >= 3 && p > 0 && uvSamePitch) ? reinterpret_cast<const pixel_t*>(src2->GetReadPtr(planes[p + 1])) : nullptr;
+      const pixel_t* pSrc3B = (numChilds >= 4 && p > 0 && uvSamePitch) ? reinterpret_cast<const pixel_t*>(src3->GetReadPtr(planes[p + 1])) : nullptr;
+      pixel_t* pDstA = reinterpret_cast<pixel_t*>(dst->GetWritePtr(planes[p]));
+      pixel_t* pDstB = (p > 0 && uvSamePitch) ? reinterpret_cast<pixel_t*>(dst->GetWritePtr(planes[p + 1])) : nullptr;
 
-      int pitch = src0->GetPitch(planes[p]) / sizeof(pixel_t);
+      const int pitch = src0->GetPitch(planes[p]) / sizeof(pixel_t);
       int width = vi.width;
       int height = vi.height;
 
@@ -1737,33 +1824,37 @@ protected:
         height >>= logUVy;
       }
 
-      int width4 = width >> 2;
-      int pitch4 = pitch >> 2;
+      const int width4 = width >> 2;
+      const int pitch4 = pitch >> 2;
 
       if (mode == 0) {
-        launch_elementwise<vpixel_t, vpixel_t, CopyFunction<vpixel_t>>(
-          (vpixel_t*)pDst, (const vpixel_t*)pSrc0, width4, height, pitch4, planeStream);
+        //launch_elementwise<vpixel_t, vpixel_t, CopyFunction<vpixel_t>>(
+        //  (vpixel_t*)pDst, (const vpixel_t*)pSrc0, width4, height, pitch4, planeStream);
+        cudaMemcpy2DAsync(pDstA, pitch * sizeof(pixel_t), pSrc0A, pitch * sizeof(pixel_t), width * sizeof(pixel_t), height, cudaMemcpyDeviceToDevice, planeStream);
         DEBUG_SYNC;
         continue;
       }
 
       switch (modes[p]) {
       case 2:
-        launch_elementwise<vpixel_t, vpixel_t, CopyFunction<vpixel_t>>(
-          (vpixel_t*)pDst, (const vpixel_t*)pSrc0, width4, height, pitch4, planeStream);
+        //launch_elementwise<vpixel_t, vpixel_t, CopyFunction<vpixel_t>>(
+        //  (vpixel_t*)pDst, (const vpixel_t*)pSrc0, width4, height, pitch4, planeStream);
+        cudaMemcpy2DAsync(pDstA, pitch * sizeof(pixel_t), pSrc0A, pitch * sizeof(pixel_t), width * sizeof(pixel_t), height, cudaMemcpyDeviceToDevice, planeStream);
         DEBUG_SYNC;
         break;
       case 3:
-        ProcPlane(p, pDst, pSrc0, pSrc1, pSrc2, pSrc3, width, height, pitch, planeStream);
+        ProcPlane(p, pDstA, pDstB, pSrc0A, pSrc0B, pSrc1A, pSrc1B, pSrc2A, pSrc2B, pSrc3A, pSrc3B, width, height, pitch, planeStream);
         break;
       case 4:
-        launch_elementwise<vpixel_t, vpixel_t, CopyFunction<vpixel_t>>(
-          (vpixel_t*)pDst, (const vpixel_t*)pSrc1, width4, height, pitch4, planeStream);
+        //launch_elementwise<vpixel_t, vpixel_t, CopyFunction<vpixel_t>>(
+        //  (vpixel_t*)pDst, (const vpixel_t*)pSrc1, width4, height, pitch4, planeStream);
+        cudaMemcpy2DAsync(pDstA, pitch * sizeof(pixel_t), pSrc1A, pitch * sizeof(pixel_t), width * sizeof(pixel_t), height, cudaMemcpyDeviceToDevice, planeStream);
         DEBUG_SYNC;
         break;
       case 5:
-        launch_elementwise<vpixel_t, vpixel_t, CopyFunction<vpixel_t>>(
-          (vpixel_t*)pDst, (const vpixel_t*)pSrc2, width4, height, pitch4, planeStream);
+        //launch_elementwise<vpixel_t, vpixel_t, CopyFunction<vpixel_t>>(
+        //  (vpixel_t*)pDst, (const vpixel_t*)pSrc2, width4, height, pitch4, planeStream);
+        cudaMemcpy2DAsync(pDstA, pitch * sizeof(pixel_t), pSrc2A, pitch * sizeof(pixel_t), width * sizeof(pixel_t), height, cudaMemcpyDeviceToDevice, planeStream);
         DEBUG_SYNC;
         break;
       }
@@ -1843,9 +1934,9 @@ public:
 
 template <typename vpixel_t, typename Op>
 __global__ void kl_makediff(
-  vpixel_t* pDst,
-  const vpixel_t* __restrict__ pA,
-  const vpixel_t* __restrict__ pB,
+  vpixel_t* pDstA, vpixel_t* pDstB,
+  const vpixel_t* __restrict__ pA0,const vpixel_t* __restrict__ pA1,
+  const vpixel_t* __restrict__ pB0,const vpixel_t* __restrict__ pB1,
   int width4, int height, int pitch4, int range_half
 )
 {
@@ -1853,6 +1944,9 @@ __global__ void kl_makediff(
 
   int x = threadIdx.x + blockIdx.x * blockDim.x;
   int y = threadIdx.y + blockIdx.y * blockDim.y;
+  vpixel_t* pDst = (blockIdx.z) ? pDstB : pDstA;
+  const vpixel_t* __restrict__ pA = (blockIdx.z) ? pA1 : pA0;
+  const vpixel_t* __restrict__ pB = (blockIdx.z) ? pB1 : pB0;
 
   if (x < width4 && y < height) {
     auto tmp = op(to_int(pA[x + y * pitch4]), to_int(pB[x + y * pitch4]), range_half);
@@ -1877,23 +1971,31 @@ class KMakeDiff : public KMasktoolFilterBase
 {
 protected:
 
-  virtual void ProcPlane(int p, uint8_t* pDst,
-    const uint8_t* pSrc0, const uint8_t* pSrc1, const uint8_t* pSrc2, const uint8_t* pSrc3,
+  virtual void ProcPlane(int p, uint8_t* pDstA, uint8_t* pDstB,
+      const uint8_t* pSrc0A, const uint8_t* pSrc0B,
+      const uint8_t* pSrc1A, const uint8_t* pSrc1B,
+      const uint8_t* pSrc2A, const uint8_t* pSrc2B,
+      const uint8_t* pSrc3A, const uint8_t* pSrc3B,
     int width, int height, int pitch, cudaStream_t stream)
   {
-    ProcPlane_(pDst, pSrc0, pSrc1, pSrc2, width, height, pitch, stream);
+    ProcPlane_(pDstA, pDstB, pSrc0A, pSrc0B, pSrc1A, pSrc1B, pSrc2A, pSrc2B, width, height, pitch, stream);
   }
 
-  virtual void ProcPlane(int p, uint16_t* pDst,
-    const uint16_t* pSrc0, const uint16_t* pSrc1, const uint16_t* pSrc2, const uint16_t* pSrc3,
+  virtual void ProcPlane(int p, uint16_t* pDstA, uint16_t* pDstB,
+      const uint16_t* pSrc0A, const uint16_t* pSrc0B,
+      const uint16_t* pSrc1A, const uint16_t* pSrc1B,
+      const uint16_t* pSrc2A, const uint16_t* pSrc2B,
+      const uint16_t* pSrc3A, const uint16_t* pSrc3B,
     int width, int height, int pitch, cudaStream_t stream)
   {
-    ProcPlane_(pDst, pSrc0, pSrc1, pSrc2, width, height, pitch, stream);
+    ProcPlane_(pDstA, pDstB, pSrc0A, pSrc0B, pSrc1A, pSrc1B, pSrc2A, pSrc2B, width, height, pitch, stream);
   }
 
   template <typename pixel_t>
-  void ProcPlane_(pixel_t* pDst,
-    const pixel_t* pSrc0, const pixel_t* pSrc1, const pixel_t* pSrc2,
+  void ProcPlane_(pixel_t* pDstA, pixel_t* pDstB,
+    const pixel_t* pSrc0A, const pixel_t* pSrc0B,
+    const pixel_t* pSrc1A, const pixel_t* pSrc1B,
+    const pixel_t* pSrc2A, const pixel_t* pSrc2B,
     int width, int height, int pitch, cudaStream_t stream)
   {
     typedef typename VectorType<pixel_t>::type vpixel_t;
@@ -1904,9 +2006,9 @@ protected:
     int bits = vi.BitsPerComponent();
 
     dim3 threads(32, 16);
-    dim3 blocks(nblocks(width4, threads.x), nblocks(height, threads.y));
+    dim3 blocks(nblocks(width4, threads.x), nblocks(height, threads.y), pDstB ? 2 : 1);
     kl_makediff<vpixel_t, Op> << <blocks, threads, 0, stream >> > (
-      (vpixel_t*)pDst, (const vpixel_t*)pSrc0, (const vpixel_t*)pSrc1, width4, height, pitch4, 1 << (bits - 1));
+      (vpixel_t*)pDstA, (vpixel_t*)pDstB, (const vpixel_t*)pSrc0A, (const vpixel_t*)pSrc0B, (const vpixel_t*)pSrc1A, (const vpixel_t*)pSrc1B, width4, height, pitch4, 1 << (bits - 1));
     DEBUG_SYNC;
   }
 
@@ -1930,8 +2032,8 @@ public:
 // è„â∫2ÉâÉCÉìï™ÇÕèúÇ¢ÇƒìnÇ∑
 template <typename vpixel_t, typename F>
 __global__ void kl_box5_v_and_border(
-  vpixel_t* pDst,
-  const vpixel_t* __restrict__ pSrc,
+  vpixel_t* pDstA, vpixel_t* pDstB,
+  const vpixel_t* __restrict__ pSrcA, const vpixel_t* __restrict__ pSrcB,
   int width4, int height, int pitch4
 )
 {
@@ -1939,6 +2041,8 @@ __global__ void kl_box5_v_and_border(
 
   int x = threadIdx.x + blockIdx.x * blockDim.x;
   int y = threadIdx.y + blockIdx.y * blockDim.y;
+  vpixel_t* pDst = (blockIdx.z) ? pDstB : pDstA;
+  const vpixel_t* __restrict__ pSrc = (blockIdx.z) ? pSrcB : pSrcA;
 
   if (x < width4 && y < height) {
     auto v2 = to_int(pSrc[x + (y + 0) * pitch4]);
@@ -1947,64 +2051,6 @@ __global__ void kl_box5_v_and_border(
     auto v3 = (y + 1 < height) ? to_int(pSrc[x + (y + 1) * pitch4]) : v2;
     auto v4 = (y + 2 < height) ? to_int(pSrc[x + (y + 2) * pitch4]) : v2;
 
-
-    auto tmp = f(v0, v1, v2, v3, v4);
-    pDst[x + y * pitch4] = VHelper<vpixel_t>::cast_to(tmp);
-  }
-}
-
-// è„â∫2ÉâÉCÉìï™ÇÕèúÇ¢ÇƒìnÇ∑
-template <typename vpixel_t, typename F>
-__global__ void kl_box5_v(
-  vpixel_t* pDst,
-  const vpixel_t* __restrict__ pSrc,
-  int width4, int height, int pitch4
-)
-{
-  F f;
-
-  int x = threadIdx.x + blockIdx.x * blockDim.x;
-  int y = threadIdx.y + blockIdx.y * blockDim.y;
-
-  if (x < width4 && y < height) {
-    auto v0 = to_int(pSrc[x + (y - 2) * pitch4]);
-    auto v1 = to_int(pSrc[x + (y - 1) * pitch4]);
-    auto v2 = to_int(pSrc[x + (y + 0) * pitch4]);
-    auto v3 = to_int(pSrc[x + (y + 1) * pitch4]);
-    auto v4 = to_int(pSrc[x + (y + 2) * pitch4]);
-    auto tmp = f(v0, v1, v2, v3, v4);
-    pDst[x + y * pitch4] = VHelper<vpixel_t>::cast_to(tmp);
-  }
-}
-
-// è„â∫2ÉâÉCÉìï™ÇæÇØèàóùÇ∑ÇÈ
-// threads: (X,4), blocks(nblocks(width4,X))
-template <typename vpixel_t, typename F>
-__global__ void kl_box5_v_border(
-  vpixel_t* pDst,
-  const vpixel_t* __restrict__ pSrc,
-  int width4, int height, int pitch4
-)
-{
-  F f;
-
-  int x = threadIdx.x + blockIdx.x * blockDim.x;
-  int ty = threadIdx.y;
-
-  int y;
-  if (ty < 2) {
-    y = ty;
-  }
-  else {
-    y = height - (ty - 2) - 1;
-  }
-
-  if (x < width4) {
-    auto v2 = to_int(pSrc[x + (y + 0) * pitch4]);
-    auto v0 = (y - 2 >= 0) ? to_int(pSrc[x + (y - 2) * pitch4]) : v2;
-    auto v1 = (y - 1 >= 0) ? to_int(pSrc[x + (y - 1) * pitch4]) : v2;
-    auto v3 = (y + 1 < height) ? to_int(pSrc[x + (y + 1) * pitch4]) : v2;
-    auto v4 = (y + 2 < height) ? to_int(pSrc[x + (y + 2) * pitch4]) : v2;
     auto tmp = f(v0, v1, v2, v3, v4);
     pDst[x + y * pitch4] = VHelper<vpixel_t>::cast_to(tmp);
   }
@@ -2026,53 +2072,42 @@ class KXpandVerticalX2 : public KMasktoolFilterBase
 {
 protected:
 
-  virtual void ProcPlane(int p, uint8_t* pDst,
-    const uint8_t* pSrc0, const uint8_t* pSrc1, const uint8_t* pSrc2, const uint8_t* pSrc3,
+  virtual void ProcPlane(int p, uint8_t* pDstA, uint8_t* pDstB,
+      const uint8_t* pSrc0A, const uint8_t* pSrc0B,
+      const uint8_t* pSrc1A, const uint8_t* pSrc1B,
+      const uint8_t* pSrc2A, const uint8_t* pSrc2B,
+      const uint8_t* pSrc3A, const uint8_t* pSrc3B,
     int width, int height, int pitch, cudaStream_t stream)
   {
-    ProcPlane_(pDst, pSrc0, pSrc1, pSrc2, width, height, pitch, stream);
+    ProcPlane_(pDstA, pDstB, pSrc0A, pSrc0B, pSrc1A, pSrc1B, pSrc2A, pSrc2B, width, height, pitch, stream);
   }
 
-  virtual void ProcPlane(int p, uint16_t* pDst,
-    const uint16_t* pSrc0, const uint16_t* pSrc1, const uint16_t* pSrc2, const uint16_t* pSrc3,
+  virtual void ProcPlane(int p, uint16_t* pDstA, uint16_t* pDstB,
+      const uint16_t* pSrc0A, const uint16_t* pSrc0B,
+      const uint16_t* pSrc1A, const uint16_t* pSrc1B,
+      const uint16_t* pSrc2A, const uint16_t* pSrc2B,
+      const uint16_t* pSrc3A, const uint16_t* pSrc3B,
     int width, int height, int pitch, cudaStream_t stream)
   {
-    ProcPlane_(pDst, pSrc0, pSrc1, pSrc2, width, height, pitch, stream);
+    ProcPlane_(pDstA, pDstB, pSrc0A, pSrc0B, pSrc1A, pSrc1B, pSrc2A, pSrc2B, width, height, pitch, stream);
   }
 
   template <typename pixel_t>
-  void ProcPlane_(pixel_t* pDst,
-    const pixel_t* pSrc0, const pixel_t* pSrc1, const pixel_t* pSrc2,
+  void ProcPlane_(pixel_t* pDstA, pixel_t* pDstB,
+      const pixel_t* pSrc0A, const pixel_t* pSrc0B,
+      const pixel_t* pSrc1A, const pixel_t* pSrc1B,
+      const pixel_t* pSrc2A, const pixel_t* pSrc2B,
     int width, int height, int pitch, cudaStream_t stream)
   {
     typedef typename VectorType<pixel_t>::type vpixel_t;
 
     int width4 = width / 4;
     int pitch4 = pitch / 4;
-    if (true) {
-        {
-            dim3 threads(32, 16);
-            dim3 blocks(nblocks(width4, threads.x), nblocks(height, threads.y));
-            kl_box5_v_and_border<vpixel_t, F> << <blocks, threads, 0, stream >> > (
-                (vpixel_t*)pDst, (const vpixel_t*)pSrc0, width4, height, pitch4);
-            DEBUG_SYNC;
-        }
-    } else {
-        {
-            dim3 threads(32, 16);
-            dim3 blocks(nblocks(width4, threads.x), nblocks(height - 4, threads.y));
-            kl_box5_v<vpixel_t, F> << <blocks, threads, 0, stream >> > (
-                (vpixel_t*)(pDst + pitch * 2), (const vpixel_t*)(pSrc0 + pitch * 2), width4, height - 4, pitch4);
-            DEBUG_SYNC;
-        }
-        {
-            dim3 threads(32, 4);
-            dim3 blocks(nblocks(width4, threads.x));
-            kl_box5_v_border<vpixel_t, F> << <blocks, threads, 0, stream >> > (
-                (vpixel_t*)pDst, (const vpixel_t*)pSrc0, width4, height, pitch4);
-            DEBUG_SYNC;
-        }
-    }
+    dim3 threads(32, 16);
+    dim3 blocks(nblocks(width4, threads.x), nblocks(height, threads.y), pDstB ? 2 : 1);
+    kl_box5_v_and_border<vpixel_t, F> << <blocks, threads, 0, stream >> > (
+        (vpixel_t*)pDstA, (vpixel_t*)pDstB, (const vpixel_t*)pSrc0A, (const vpixel_t*)pSrc0B, width4, height, pitch4);
+    DEBUG_SYNC;
   }
 
 public:
@@ -2092,14 +2127,16 @@ public:
 
 template <typename vpixel_t, typename F>
 __global__ void kl_logic1(
-  vpixel_t* pDst,
-  const vpixel_t* __restrict__ pSrc,
+  vpixel_t* pDstA, vpixel_t* pDstB,
+  const vpixel_t* __restrict__ pSrcA, const vpixel_t* __restrict__ pSrcB,
   int width4, int height, int pitch4
 )
 {
   F f;
-  int x = threadIdx.x + blockIdx.x * blockDim.x;
-  int y = threadIdx.y + blockIdx.y * blockDim.y;
+  const int x = threadIdx.x + blockIdx.x * blockDim.x;
+  const int y = threadIdx.y + blockIdx.y * blockDim.y;
+  vpixel_t* pDst = (blockIdx.z) ? pDstB : pDstA;
+  const vpixel_t* __restrict__ pSrc = (blockIdx.z) ? pSrcB : pSrcA;
 
   if (x < width4 && y < height) {
     int4 src = to_int(pSrc[x + y * pitch4]);
@@ -2110,15 +2147,18 @@ __global__ void kl_logic1(
 
 template <typename vpixel_t, typename F>
 __global__ void kl_logic2(
-  vpixel_t* pDst,
-  const vpixel_t* __restrict__ pSrc0,
-  const vpixel_t* __restrict__ pSrc1,
+  vpixel_t* pDstA, vpixel_t* pDstB,
+  const vpixel_t* __restrict__ pSrc0A, const vpixel_t* __restrict__ pSrc0B,
+  const vpixel_t* __restrict__ pSrc1A, const vpixel_t* __restrict__ pSrc1B,
   int width4, int height, int pitch4
 )
 {
   F f;
-  int x = threadIdx.x + blockIdx.x * blockDim.x;
-  int y = threadIdx.y + blockIdx.y * blockDim.y;
+  const int x = threadIdx.x + blockIdx.x * blockDim.x;
+  const int y = threadIdx.y + blockIdx.y * blockDim.y;
+  vpixel_t* pDst = (blockIdx.z) ? pDstB : pDstA;
+  const vpixel_t* __restrict__ pSrc0 = (blockIdx.z) ? pSrc0B : pSrc0A;
+  const vpixel_t* __restrict__ pSrc1 = (blockIdx.z) ? pSrc1B : pSrc1A;
 
   if (x < width4 && y < height) {
     int4 src0 = to_int(pSrc0[x + y * pitch4]);
@@ -2130,16 +2170,20 @@ __global__ void kl_logic2(
 
 template <typename vpixel_t, typename F>
 __global__ void kl_logic3(
-  vpixel_t* pDst,
-  const vpixel_t* __restrict__ pSrc0,
-  const vpixel_t* __restrict__ pSrc1,
-  const vpixel_t* __restrict__ pSrc2,
+  vpixel_t* pDstA, vpixel_t* pDstB,
+  const vpixel_t* __restrict__ pSrc0A, const vpixel_t* __restrict__ pSrc0B,
+  const vpixel_t* __restrict__ pSrc1A, const vpixel_t* __restrict__ pSrc1B,
+  const vpixel_t* __restrict__ pSrc2A, const vpixel_t* __restrict__ pSrc2B,
   int width4, int height, int pitch4
 )
 {
   F f;
-  int x = threadIdx.x + blockIdx.x * blockDim.x;
-  int y = threadIdx.y + blockIdx.y * blockDim.y;
+  const int x = threadIdx.x + blockIdx.x * blockDim.x;
+  const int y = threadIdx.y + blockIdx.y * blockDim.y;
+  vpixel_t* pDst = (blockIdx.z) ? pDstB : pDstA;
+  const vpixel_t* __restrict__ pSrc0 = (blockIdx.z) ? pSrc0B : pSrc0A;
+  const vpixel_t* __restrict__ pSrc1 = (blockIdx.z) ? pSrc1B : pSrc1A;
+  const vpixel_t* __restrict__ pSrc2 = (blockIdx.z) ? pSrc2B : pSrc2A;
 
   if (x < width4 && y < height) {
     int4 src0 = to_int(pSrc0[x + y * pitch4]);
@@ -2166,23 +2210,31 @@ class KLogic1 : public KMasktoolFilterBase
 {
 protected:
 
-  virtual void ProcPlane(int p, uint8_t* pDst,
-    const uint8_t* pSrc0, const uint8_t* pSrc1, const uint8_t* pSrc2, const uint8_t* pSrc3,
+  virtual void ProcPlane(int p, uint8_t* pDstA, uint8_t* pDstB,
+      const uint8_t* pSrc0A, const uint8_t* pSrc0B,
+      const uint8_t* pSrc1A, const uint8_t* pSrc1B,
+      const uint8_t* pSrc2A, const uint8_t* pSrc2B,
+      const uint8_t* pSrc3A, const uint8_t* pSrc3B,
     int width, int height, int pitch, cudaStream_t stream)
   {
-    ProcPlane_(pDst, pSrc0, pSrc1, pSrc2, width, height, pitch, stream);
+    ProcPlane_(pDstA, pDstB, pSrc0A, pSrc0B, pSrc1A, pSrc1B, pSrc2A, pSrc2B, width, height, pitch, stream);
   }
 
-  virtual void ProcPlane(int p, uint16_t* pDst,
-    const uint16_t* pSrc0, const uint16_t* pSrc1, const uint16_t* pSrc2, const uint16_t* pSrc3,
+  virtual void ProcPlane(int p, uint16_t* pDstA, uint16_t* pDstB,
+      const uint16_t* pSrc0A, const uint16_t* pSrc0B,
+      const uint16_t* pSrc1A, const uint16_t* pSrc1B,
+      const uint16_t* pSrc2A, const uint16_t* pSrc2B,
+      const uint16_t* pSrc3A, const uint16_t* pSrc3B,
     int width, int height, int pitch, cudaStream_t stream)
   {
-    ProcPlane_(pDst, pSrc0, pSrc1, pSrc2, width, height, pitch, stream);
+    ProcPlane_(pDstA, pDstB, pSrc0A, pSrc0B, pSrc1A, pSrc1B, pSrc2A, pSrc2B, width, height, pitch, stream);
   }
 
   template <typename pixel_t>
-  void ProcPlane_(pixel_t* pDst,
-    const pixel_t* pSrc0, const pixel_t* pSrc1, const pixel_t* pSrc2,
+  void ProcPlane_(pixel_t* pDstA, pixel_t* pDstB,
+    const pixel_t* pSrc0A, const pixel_t* pSrc0B,
+    const pixel_t* pSrc1A, const pixel_t* pSrc1B,
+    const pixel_t* pSrc2A, const pixel_t* pSrc2B,
     int width, int height, int pitch, cudaStream_t stream)
   {
     typedef typename VectorType<pixel_t>::type vpixel_t;
@@ -2191,9 +2243,9 @@ protected:
     int pitch4 = pitch / 4;
 
     dim3 threads(32, 16);
-    dim3 blocks(nblocks(width4, threads.x), nblocks(height, threads.y));
+    dim3 blocks(nblocks(width4, threads.x), nblocks(height, threads.y), pDstB ? 2 : 1);
     kl_logic1<vpixel_t, F> << <blocks, threads, 0, stream >> > (
-      (vpixel_t*)pDst, (const vpixel_t*)pSrc0, width4, height, pitch4);
+      (vpixel_t*)pDstA, (vpixel_t*)pDstB, (const vpixel_t*)pSrc0A, (const vpixel_t*)pSrc0B, width4, height, pitch4);
     DEBUG_SYNC;
   }
 
@@ -2208,23 +2260,31 @@ class KLogic2 : public KMasktoolFilterBase
 {
 protected:
 
-  virtual void ProcPlane(int p, uint8_t* pDst,
-    const uint8_t* pSrc0, const uint8_t* pSrc1, const uint8_t* pSrc2, const uint8_t* pSrc3,
+  virtual void ProcPlane(int p, uint8_t* pDstA, uint8_t* pDstB,
+      const uint8_t* pSrc0A, const uint8_t* pSrc0B,
+      const uint8_t* pSrc1A, const uint8_t* pSrc1B,
+      const uint8_t* pSrc2A, const uint8_t* pSrc2B,
+      const uint8_t* pSrc3A, const uint8_t* pSrc3B,
     int width, int height, int pitch, cudaStream_t stream)
   {
-    ProcPlane_(pDst, pSrc0, pSrc1, pSrc2, width, height, pitch, stream);
+    ProcPlane_(pDstA, pDstB, pSrc0A, pSrc0B, pSrc1A, pSrc1B, pSrc2A, pSrc2B, width, height, pitch, stream);
   }
 
-  virtual void ProcPlane(int p, uint16_t* pDst,
-    const uint16_t* pSrc0, const uint16_t* pSrc1, const uint16_t* pSrc2, const uint16_t* pSrc3,
+  virtual void ProcPlane(int p, uint16_t* pDstA, uint16_t* pDstB,
+      const uint16_t* pSrc0A, const uint16_t* pSrc0B,
+      const uint16_t* pSrc1A, const uint16_t* pSrc1B,
+      const uint16_t* pSrc2A, const uint16_t* pSrc2B,
+      const uint16_t* pSrc3A, const uint16_t* pSrc3B,
     int width, int height, int pitch, cudaStream_t stream)
   {
-    ProcPlane_(pDst, pSrc0, pSrc1, pSrc2, width, height, pitch, stream);
+    ProcPlane_(pDstA, pDstB, pSrc0A, pSrc0B, pSrc1A, pSrc1B, pSrc2A, pSrc2B, width, height, pitch, stream);
   }
 
   template <typename pixel_t>
-  void ProcPlane_(pixel_t* pDst,
-    const pixel_t* pSrc0, const pixel_t* pSrc1, const pixel_t* pSrc2,
+  void ProcPlane_(pixel_t* pDstA, pixel_t* pDstB,
+    const pixel_t* pSrc0A, const pixel_t* pSrc0B,
+    const pixel_t* pSrc1A, const pixel_t* pSrc1B,
+    const pixel_t* pSrc2A, const pixel_t* pSrc2B,
     int width, int height, int pitch, cudaStream_t stream)
   {
     typedef typename VectorType<pixel_t>::type vpixel_t;
@@ -2233,9 +2293,9 @@ protected:
     int pitch4 = pitch / 4;
 
     dim3 threads(32, 16);
-    dim3 blocks(nblocks(width4, threads.x), nblocks(height, threads.y));
+    dim3 blocks(nblocks(width4, threads.x), nblocks(height, threads.y), pDstB ? 2 : 1);
     kl_logic2<vpixel_t, F> << <blocks, threads, 0, stream >> > (
-      (vpixel_t*)pDst, (const vpixel_t*)pSrc0, (const vpixel_t*)pSrc1, width4, height, pitch4);
+        (vpixel_t*)pDstA, (vpixel_t*)pDstB, (const vpixel_t*)pSrc0A, (const vpixel_t*)pSrc0B, (const vpixel_t*)pSrc1A, (const vpixel_t*)pSrc1B, width4, height, pitch4);
     DEBUG_SYNC;
   }
 
@@ -2250,23 +2310,31 @@ class KLogic3 : public KMasktoolFilterBase
 {
 protected:
 
-  virtual void ProcPlane(int p, uint8_t* pDst,
-    const uint8_t* pSrc0, const uint8_t* pSrc1, const uint8_t* pSrc2,
+  virtual void ProcPlane(int p, uint8_t* pDstA, uint8_t* pDstB,
+      const uint8_t* pSrc0A, const uint8_t* pSrc0B,
+      const uint8_t* pSrc1A, const uint8_t* pSrc1B,
+      const uint8_t* pSrc2A, const uint8_t* pSrc2B,
+      const uint8_t* pSrc3A, const uint8_t* pSrc3B,
     int width, int height, int pitch, PNeoEnv env)
   {
-    ProcPlane_(pDst, pSrc0, pSrc1, pSrc2, width, height, pitch, env);
+    ProcPlane_(pDstA, pDstB, pSrc0A, pSrc0B, pSrc1A, pSrc1B, pSrc2A, pSrc2B, width, height, pitch, env);
   }
 
-  virtual void ProcPlane(int p, uint16_t* pDst,
-    const uint16_t* pSrc0, const uint16_t* pSrc1, const uint16_t* pSrc2,
+  virtual void ProcPlane(int p, uint16_t* pDstA, uint16_t* pDstB,
+      const uint16_t* pSrc0A, const uint16_t* pSrc0B,
+      const uint16_t* pSrc1A, const uint16_t* pSrc1B,
+      const uint16_t* pSrc2A, const uint16_t* pSrc2B,
+      const uint16_t* pSrc3A, const uint16_t* pSrc3B,
     int width, int height, int pitch, PNeoEnv env)
   {
-    ProcPlane_(pDst, pSrc0, pSrc1, pSrc2, width, height, pitch, env);
+    ProcPlane_(pDstA, pDstB, pSrc0A, pSrc0B, pSrc1A, pSrc1B, pSrc2A, pSrc2B, width, height, pitch, env);
   }
 
   template <typename pixel_t>
-  void ProcPlane_(pixel_t* pDst,
-    const pixel_t* pSrc0, const pixel_t* pSrc1, const pixel_t* pSrc2,
+  void ProcPlane_(pixel_t* pDstA, pixel_t* pDstB,
+    const pixel_t* pSrc0A, const pixel_t* pSrc0B,
+    const pixel_t* pSrc1A, const pixel_t* pSrc1B,
+    const pixel_t* pSrc2A, const pixel_t* pSrc2B,
     int width, int height, int pitch, cudaStream_t stream)
   {
     typedef typename VectorType<pixel_t>::type vpixel_t;
@@ -2275,9 +2343,12 @@ protected:
     int pitch4 = pitch / 4;
 
     dim3 threads(32, 16);
-    dim3 blocks(nblocks(width4, threads.x), nblocks(height, threads.y));
-    kl_logic3<vpixel_t, F> << <blocks, threads, 0, stream >> > ((vpixel_t*)pDst,
-      (const vpixel_t*)pSrc0, (const vpixel_t*)pSrc1, (const vpixel_t*)pSrc2, width4, height, pitch4);
+    dim3 blocks(nblocks(width4, threads.x), nblocks(height, threads.y), pDstB ? 2 : 1);
+    kl_logic3<vpixel_t, F> << <blocks, threads, 0, stream >> > (
+        (vpixel_t*)pDstA, (vpixel_t*)pDstB,
+        (const vpixel_t*)pSrc0A, (const vpixel_t*)pSrc0B,
+        (const vpixel_t*)pSrc1A, (const vpixel_t*)pSrc1B,
+        (const vpixel_t*)pSrc2A, (const vpixel_t*)pSrc2B, width4, height, pitch4);
     DEBUG_SYNC;
   }
 
@@ -2322,17 +2393,22 @@ __device__ int dev_bobshimmerfixes_merge(
 
 template <typename vpixel_t>
 __global__ void kl_bobshimmerfixes_merge(
-  vpixel_t* pDst,
-  const vpixel_t* __restrict__ pSrc,
-  const vpixel_t* __restrict__ pDiff,
-  const vpixel_t* __restrict__ pChoke1,
-  const vpixel_t* __restrict__ pChoke2,
+  vpixel_t* pDstA,                       vpixel_t* pDstB,
+  const vpixel_t* __restrict__ pSrcA,    const vpixel_t* __restrict__ pSrcB,
+  const vpixel_t* __restrict__ pDiffA,   const vpixel_t* __restrict__ pDiffB,
+  const vpixel_t* __restrict__ pChoke1A, const vpixel_t* __restrict__ pChoke1B,
+  const vpixel_t* __restrict__ pChoke2A, const vpixel_t* __restrict__ pChoke2B,
   int width4, int height, int pitch4,
   int scale
 )
 {
   int x = threadIdx.x + blockIdx.x * blockDim.x;
   int y = threadIdx.y + blockIdx.y * blockDim.y;
+  vpixel_t* pDst = (blockIdx.z) ? pDstB : pDstA;
+  const vpixel_t* __restrict__ pSrc = (blockIdx.z) ? pSrcB : pSrcA;
+  const vpixel_t* __restrict__ pDiff = (blockIdx.z) ? pDiffB : pDiffA;
+  const vpixel_t* __restrict__ pChoke1 = (blockIdx.z) ? pChoke1B : pChoke1A;
+  const vpixel_t* __restrict__ pChoke2 = (blockIdx.z) ? pChoke2B : pChoke2A;
 
   if (x < width4 && y < height) {
     auto src = to_int(pSrc[x + y * pitch4]);
@@ -2353,23 +2429,32 @@ class KTGMC_BobShimmerFixesMerge : public KMasktoolFilterBase
 {
 protected:
 
-  virtual void ProcPlane(int p, uint8_t* pDst,
-    const uint8_t* pSrc0, const uint8_t* pSrc1, const uint8_t* pSrc2, const uint8_t* pSrc3,
+  virtual void ProcPlane(int p, uint8_t* pDstA, uint8_t* pDstB,
+      const uint8_t* pSrc0A, const uint8_t* pSrc0B,
+      const uint8_t* pSrc1A, const uint8_t* pSrc1B,
+      const uint8_t* pSrc2A, const uint8_t* pSrc2B,
+      const uint8_t* pSrc3A, const uint8_t* pSrc3B,
     int width, int height, int pitch, cudaStream_t stream)
   {
-    ProcPlane_(pDst, pSrc0, pSrc1, pSrc2, pSrc3, width, height, pitch, stream);
+    ProcPlane_(pDstA, pDstB, pSrc0A, pSrc0B, pSrc1A, pSrc1B, pSrc2A, pSrc2B, pSrc3A, pSrc3B, width, height, pitch, stream);
   }
 
-  virtual void ProcPlane(int p, uint16_t* pDst,
-    const uint16_t* pSrc0, const uint16_t* pSrc1, const uint16_t* pSrc2, const uint16_t* pSrc3,
+  virtual void ProcPlane(int p, uint16_t* pDstA, uint16_t* pDstB,
+      const uint16_t* pSrc0A, const uint16_t* pSrc0B,
+      const uint16_t* pSrc1A, const uint16_t* pSrc1B,
+      const uint16_t* pSrc2A, const uint16_t* pSrc2B,
+      const uint16_t* pSrc3A, const uint16_t* pSrc3B,
     int width, int height, int pitch, cudaStream_t stream)
   {
-    ProcPlane_(pDst, pSrc0, pSrc1, pSrc2, pSrc3, width, height, pitch, stream);
+    ProcPlane_(pDstA, pDstB, pSrc0A, pSrc0B, pSrc1A, pSrc1B, pSrc2A, pSrc2B, pSrc3A, pSrc3B, width, height, pitch, stream);
   }
 
   template <typename pixel_t>
-  void ProcPlane_(pixel_t* pDst,
-    const pixel_t* pSrc, const pixel_t* pDiff, const pixel_t* pChoke1, const pixel_t* pChoke2,
+  void ProcPlane_(pixel_t* pDstA, pixel_t* pDstB,
+    const pixel_t* pSrcA,    const pixel_t* pSrcB,
+    const pixel_t* pDiffA,   const pixel_t* pDiffB,
+    const pixel_t* pChoke1A, const pixel_t* pChoke1B,
+    const pixel_t* pChoke2A, const pixel_t* pChoke2B,
     int width, int height, int pitch, cudaStream_t stream)
   {
     typedef typename VectorType<pixel_t>::type vpixel_t;
@@ -2380,10 +2465,12 @@ protected:
     int scale = vi.BitsPerComponent() - 8;
 
     dim3 threads(32, 16);
-    dim3 blocks(nblocks(width4, threads.x), nblocks(height, threads.y));
-    kl_bobshimmerfixes_merge<vpixel_t> << <blocks, threads, 0, stream >> > ((vpixel_t*)pDst,
-      (const vpixel_t*)pSrc, (const vpixel_t*)pDiff,
-      (const vpixel_t*)pChoke1, (const vpixel_t*)pChoke2,
+    dim3 blocks(nblocks(width4, threads.x), nblocks(height, threads.y), pDstB ? 2 : 1);
+    kl_bobshimmerfixes_merge<vpixel_t> << <blocks, threads, 0, stream >> > ((vpixel_t*)pDstA, (vpixel_t*)pDstB,
+      (const vpixel_t*)pSrcA, (const vpixel_t*)pSrcB,
+      (const vpixel_t*)pDiffA, (const vpixel_t*)pDiffB,
+      (const vpixel_t*)pChoke1A, (const vpixel_t*)pChoke1B,
+      (const vpixel_t*)pChoke2A, (const vpixel_t*)pChoke2B,
       width4, height, pitch4, scale);
     DEBUG_SYNC;
   }
@@ -2406,11 +2493,10 @@ public:
   }
 };
 
-#if 1
 template <typename vpixel_t, typename F>
 __global__ void kl_box3_v(
-    vpixel_t* pDst,
-    const vpixel_t* __restrict__ pSrc,
+    vpixel_t* pDstA, vpixel_t* pDstB,
+    const vpixel_t* __restrict__ pSrcA, const vpixel_t* __restrict__ pSrcB,
     int width4, int height, int pitch4
 )
 {
@@ -2418,6 +2504,8 @@ __global__ void kl_box3_v(
 
     int x = threadIdx.x + blockIdx.x * blockDim.x;
     int y = threadIdx.y + blockIdx.y * blockDim.y;
+    vpixel_t* pDst = (blockIdx.z) ? pDstB : pDstA;
+    const vpixel_t* __restrict__ pSrc = (blockIdx.z) ? pSrcB : pSrcA;
 
     if (x < width4 && y < height) {
         auto v1 = to_int(pSrc[x + (y + 0) * pitch4]);
@@ -2427,60 +2515,6 @@ __global__ void kl_box3_v(
         pDst[x + y * pitch4] = VHelper<vpixel_t>::cast_to(tmp);
     }
 }
-#else
-// è„â∫1ÉâÉCÉìï™ÇÕèúÇ¢ÇƒìnÇ∑
-template <typename vpixel_t, typename F>
-__global__ void kl_box3_v(
-  vpixel_t* pDst,
-  const vpixel_t* __restrict__ pSrc,
-  int width4, int height, int pitch4
-)
-{
-  F f;
-
-  int x = threadIdx.x + blockIdx.x * blockDim.x;
-  int y = threadIdx.y + blockIdx.y * blockDim.y;
-
-  if (x < width4 && y < height) {
-    auto v0 = to_int(pSrc[x + (y - 1) * pitch4]);
-    auto v1 = to_int(pSrc[x + (y + 0) * pitch4]);
-    auto v2 = to_int(pSrc[x + (y + 1) * pitch4]);
-    auto tmp = f(v0, v1, v2);
-    pDst[x + y * pitch4] = VHelper<vpixel_t>::cast_to(tmp);
-  }
-}
-
-// è„â∫1ÉâÉCÉìï™ÇæÇØèàóùÇ∑ÇÈ
-// threads: (X,2), blocks(nblocks(width4,X))
-template <typename vpixel_t, typename F>
-__global__ void kl_box3_v_border(
-  vpixel_t* pDst,
-  const vpixel_t* __restrict__ pSrc,
-  int width4, int height, int pitch4
-)
-{
-  F f;
-
-  int x = threadIdx.x + blockIdx.x * blockDim.x;
-  int ty = threadIdx.y;
-
-  int y;
-  if (ty < 1) {
-    y = ty;
-  }
-  else {
-    y = height - (ty - 1) - 1;
-  }
-
-  if (x < width4) {
-    auto v1 = to_int(pSrc[x + (y + 0) * pitch4]);
-    auto v0 = (y - 1 >= 0) ? to_int(pSrc[x + (y - 1) * pitch4]) : v1;
-    auto v2 = (y + 1 < height) ? to_int(pSrc[x + (y + 1) * pitch4]) : v1;
-    auto tmp = f(v0, v1, v2);
-    pDst[x + y * pitch4] = VHelper<vpixel_t>::cast_to(tmp);
-  }
-}
-#endif
 
 struct Resharpen {
   __device__ int4 operator()(int4 a, int4 b, int4 c) {
@@ -2494,53 +2528,42 @@ class KTGMC_VResharpen : public KMasktoolFilterBase
 {
 protected:
 
-  virtual void ProcPlane(int p, uint8_t* pDst,
-    const uint8_t* pSrc0, const uint8_t* pSrc1, const uint8_t* pSrc2, const uint8_t* pSrc3,
+  virtual void ProcPlane(int p, uint8_t* pDstA, uint8_t* pDstB,
+      const uint8_t* pSrc0A, const uint8_t* pSrc0B,
+      const uint8_t* pSrc1A, const uint8_t* pSrc1B,
+      const uint8_t* pSrc2A, const uint8_t* pSrc2B,
+      const uint8_t* pSrc3A, const uint8_t* pSrc3B,
     int width, int height, int pitch, cudaStream_t stream)
   {
-    ProcPlane_(pDst, pSrc0, width, height, pitch, stream);
+    ProcPlane_(pDstA, pDstB, pSrc0A, pSrc0B, width, height, pitch, stream);
   }
 
-  virtual void ProcPlane(int p, uint16_t* pDst,
-    const uint16_t* pSrc0, const uint16_t* pSrc1, const uint16_t* pSrc2, const uint16_t* pSrc3,
+  virtual void ProcPlane(int p, uint16_t* pDstA, uint16_t* pDstB,
+      const uint16_t* pSrc0A, const uint16_t* pSrc0B,
+      const uint16_t* pSrc1A, const uint16_t* pSrc1B,
+      const uint16_t* pSrc2A, const uint16_t* pSrc2B,
+      const uint16_t* pSrc3A, const uint16_t* pSrc3B,
     int width, int height, int pitch, cudaStream_t stream)
   {
-    ProcPlane_(pDst, pSrc0, width, height, pitch, stream);
+    ProcPlane_(pDstA, pDstB, pSrc0A, pSrc0B, width, height, pitch, stream);
   }
 
   template <typename pixel_t>
-  void ProcPlane_(pixel_t* pDst,
-    const pixel_t* pSrc0, int width, int height, int pitch, cudaStream_t stream)
+  void ProcPlane_(pixel_t* pDstA, pixel_t* pDstB,
+    const pixel_t* pSrc0A, const pixel_t* pSrc0B, int width, int height, int pitch, cudaStream_t stream)
   {
     typedef typename VectorType<pixel_t>::type vpixel_t;
 
     int width4 = width / 4;
     int pitch4 = pitch / 4;
 
-#if 1
     {
       dim3 threads(32, 16);
-      dim3 blocks(nblocks(width4, threads.x), nblocks(height, threads.y));
+      dim3 blocks(nblocks(width4, threads.x), nblocks(height, threads.y), pDstB ? 2 : 1);
       kl_box3_v<vpixel_t, Resharpen> << <blocks, threads, 0, stream >> > (
-        (vpixel_t*)(pDst), (const vpixel_t*)(pSrc0), width4, height, pitch4);
+        (vpixel_t*)(pDstA), (vpixel_t*)(pDstB), (const vpixel_t*)(pSrc0A), (const vpixel_t*)(pSrc0B), width4, height, pitch4);
       DEBUG_SYNC;
     }
-#else
-    {
-      dim3 threads(32, 16);
-      dim3 blocks(nblocks(width4, threads.x), nblocks(height - 2, threads.y));
-      kl_box3_v<vpixel_t, Resharpen> << <blocks, threads, 0, stream >> > (
-        (vpixel_t*)(pDst + pitch), (const vpixel_t*)(pSrc0 + pitch), width4, height - 2, pitch4);
-      DEBUG_SYNC;
-    }
-    {
-      dim3 threads(32, 2);
-      dim3 blocks(nblocks(width4, threads.x));
-      kl_box3_v_border<vpixel_t, Resharpen> << <blocks, threads, 0, stream >> > (
-        (vpixel_t*)pDst, (const vpixel_t*)pSrc0, width4, height, pitch4);
-      DEBUG_SYNC;
-    }
-#endif
   }
 
 public:
@@ -2560,15 +2583,18 @@ public:
 
 template <typename vpixel_t>
 __global__ void kl_resharpen(
-  vpixel_t* pDst,
-  const vpixel_t* __restrict__ pSrc0,
-  const vpixel_t* __restrict__ pSrc1,
+  vpixel_t* pDstA, vpixel_t* pDstB,
+  const vpixel_t* __restrict__ pSrc0A, const vpixel_t* __restrict__ pSrc0B,
+  const vpixel_t* __restrict__ pSrc1A, const vpixel_t* __restrict__ pSrc1B,
   int width4, int height, int pitch4,
   float sharpAdj
 )
 {
   int x = threadIdx.x + blockIdx.x * blockDim.x;
   int y = threadIdx.y + blockIdx.y * blockDim.y;
+  vpixel_t* pDst = (blockIdx.z) ? pDstB : pDstA;
+  const vpixel_t* __restrict__ pSrc0 = (blockIdx.z) ? pSrc0B : pSrc0A;
+  const vpixel_t* __restrict__ pSrc1 = (blockIdx.z) ? pSrc1B : pSrc1A;
 
   if (x < width4 && y < height) {
     auto srcx = to_float(pSrc0[x + y * pitch4]);
@@ -2585,23 +2611,30 @@ class KTGMC_Resharpen : public KMasktoolFilterBase
   float sharpAdj;
 protected:
 
-  virtual void ProcPlane(int p, uint8_t* pDst,
-    const uint8_t* pSrc0, const uint8_t* pSrc1, const uint8_t* pSrc2, const uint8_t* pSrc3,
+  virtual void ProcPlane(int p, uint8_t* pDstA, uint8_t* pDstB,
+      const uint8_t* pSrc0A, const uint8_t* pSrc0B,
+      const uint8_t* pSrc1A, const uint8_t* pSrc1B,
+      const uint8_t* pSrc2A, const uint8_t* pSrc2B,
+      const uint8_t* pSrc3A, const uint8_t* pSrc3B,
     int width, int height, int pitch, cudaStream_t stream)
   {
-    ProcPlane_(pDst, pSrc0, pSrc1, width, height, pitch, stream);
+    ProcPlane_(pDstA, pDstB, pSrc0A, pSrc0B, pSrc1A, pSrc1B, width, height, pitch, stream);
   }
 
-  virtual void ProcPlane(int p, uint16_t* pDst,
-    const uint16_t* pSrc0, const uint16_t* pSrc1, const uint16_t* pSrc2, const uint16_t* pSrc3,
+  virtual void ProcPlane(int p, uint16_t* pDstA, uint16_t* pDstB,
+      const uint16_t* pSrc0A, const uint16_t* pSrc0B,
+      const uint16_t* pSrc1A, const uint16_t* pSrc1B,
+      const uint16_t* pSrc2A, const uint16_t* pSrc2B,
+      const uint16_t* pSrc3A, const uint16_t* pSrc3B,
     int width, int height, int pitch, cudaStream_t stream)
   {
-    ProcPlane_(pDst, pSrc0, pSrc1, width, height, pitch, stream);
+    ProcPlane_(pDstA, pDstB, pSrc0A, pSrc0B, pSrc1A, pSrc1B, width, height, pitch, stream);
   }
 
   template <typename pixel_t>
-  void ProcPlane_(pixel_t* pDst,
-    const pixel_t* pSrc0, const pixel_t* pSrc1,
+  void ProcPlane_(pixel_t* pDstA, pixel_t* pDstB,
+    const pixel_t* pSrc0A, const pixel_t* pSrc0B,
+    const pixel_t* pSrc1A, const pixel_t* pSrc1B,
     int width, int height, int pitch, cudaStream_t stream)
   {
     typedef typename VectorType<pixel_t>::type vpixel_t;
@@ -2610,9 +2643,9 @@ protected:
     int pitch4 = pitch / 4;
 
     dim3 threads(32, 16);
-    dim3 blocks(nblocks(width4, threads.x), nblocks(height, threads.y));
-    kl_resharpen<vpixel_t> << <blocks, threads, 0, stream >> > ((vpixel_t*)pDst,
-      (const vpixel_t*)pSrc0, (const vpixel_t*)pSrc1,
+    dim3 blocks(nblocks(width4, threads.x), nblocks(height, threads.y), pDstB ? 2 : 1);
+    kl_resharpen<vpixel_t> << <blocks, threads, 0, stream >> > ((vpixel_t*)pDstA, (vpixel_t*)pDstB,
+      (const vpixel_t*)pSrc0A, (const vpixel_t*)pSrc0B, (const vpixel_t*)pSrc1A, (const vpixel_t*)pSrc1B,
       width4, height, pitch4, sharpAdj);
     DEBUG_SYNC;
   }
@@ -2646,17 +2679,22 @@ __device__ int dev_limit_over_sharpen(
 
 template <typename vpixel_t>
 __global__ void kl_limit_over_sharpen(
-  vpixel_t* pDst,
-  const vpixel_t* __restrict__ pSrc,
-  const vpixel_t* __restrict__ pRef,
-  const vpixel_t* __restrict__ pCompB,
-  const vpixel_t* __restrict__ pCompF,
+  vpixel_t* pDstA,                      vpixel_t* pDstB,
+  const vpixel_t* __restrict__ pSrcA,   const vpixel_t* __restrict__ pSrcB,
+  const vpixel_t* __restrict__ pRefA,   const vpixel_t* __restrict__ pRefB,
+  const vpixel_t* __restrict__ pCompBA, const vpixel_t* __restrict__ pCompBB,
+  const vpixel_t* __restrict__ pCompFA, const vpixel_t* __restrict__ pCompFB,
   int width4, int height, int pitch4,
   int osv
 )
 {
   int x = threadIdx.x + blockIdx.x * blockDim.x;
   int y = threadIdx.y + blockIdx.y * blockDim.y;
+  vpixel_t* pDst = (blockIdx.z) ? pDstB : pDstA;
+  const vpixel_t* __restrict__ pSrc = (blockIdx.z) ? pSrcB : pSrcA;
+  const vpixel_t* __restrict__ pRef = (blockIdx.z) ? pRefB : pRefA;
+  const vpixel_t* __restrict__ pCompB = (blockIdx.z) ? pCompBB : pCompBA;
+  const vpixel_t* __restrict__ pCompF = (blockIdx.z) ? pCompFB : pCompFA;
 
   if (x < width4 && y < height) {
     auto src = to_int(pSrc[x + y * pitch4]);
@@ -2678,23 +2716,32 @@ class KTGMC_LimitOverSharpen : public KMasktoolFilterBase
   int ovs;
 protected:
 
-  virtual void ProcPlane(int p, uint8_t* pDst,
-    const uint8_t* pSrc0, const uint8_t* pSrc1, const uint8_t* pSrc2, const uint8_t* pSrc3,
+  virtual void ProcPlane(int p, uint8_t* pDstA, uint8_t* pDstB,
+      const uint8_t* pSrc0A, const uint8_t* pSrc0B,
+      const uint8_t* pSrc1A, const uint8_t* pSrc1B,
+      const uint8_t* pSrc2A, const uint8_t* pSrc2B,
+      const uint8_t* pSrc3A, const uint8_t* pSrc3B,
     int width, int height, int pitch, cudaStream_t stream)
   {
-    ProcPlane_(pDst, pSrc0, pSrc1, pSrc2, pSrc3, width, height, pitch, stream);
+    ProcPlane_(pDstA, pDstB, pSrc0A, pSrc0B, pSrc1A, pSrc1B, pSrc2A, pSrc2B, pSrc3A, pSrc3B, width, height, pitch, stream);
   }
 
-  virtual void ProcPlane(int p, uint16_t* pDst,
-    const uint16_t* pSrc0, const uint16_t* pSrc1, const uint16_t* pSrc2, const uint16_t* pSrc3,
+  virtual void ProcPlane(int p, uint16_t* pDstA, uint16_t* pDstB,
+      const uint16_t* pSrc0A, const uint16_t* pSrc0B,
+      const uint16_t* pSrc1A, const uint16_t* pSrc1B,
+      const uint16_t* pSrc2A, const uint16_t* pSrc2B,
+      const uint16_t* pSrc3A, const uint16_t* pSrc3B,
     int width, int height, int pitch, cudaStream_t stream)
   {
-    ProcPlane_(pDst, pSrc0, pSrc1, pSrc2, pSrc3, width, height, pitch, stream);
+    ProcPlane_(pDstA, pDstB, pSrc0A, pSrc0B, pSrc1A, pSrc1B, pSrc2A, pSrc2B, pSrc3A, pSrc3B, width, height, pitch, stream);
   }
 
   template <typename pixel_t>
-  void ProcPlane_(pixel_t* pDst,
-    const pixel_t* pSrc, const pixel_t* pRef, const pixel_t* pCompB, const pixel_t* pCompF,
+  void ProcPlane_(pixel_t* pDstA, pixel_t* pDstB,
+    const pixel_t* pSrcA, const pixel_t* pSrcB,
+    const pixel_t* pRefA, const pixel_t* pRefB,
+    const pixel_t* pCompBA, const pixel_t* pCompBB,
+    const pixel_t* pCompFA, const pixel_t* pCompFB,
     int width, int height, int pitch, cudaStream_t stream)
   {
     typedef typename VectorType<pixel_t>::type vpixel_t;
@@ -2705,10 +2752,10 @@ protected:
     int scale = vi.BitsPerComponent() - 8;
 
     dim3 threads(32, 16);
-    dim3 blocks(nblocks(width4, threads.x), nblocks(height, threads.y));
-    kl_limit_over_sharpen<vpixel_t> << <blocks, threads, 0, stream >> > ((vpixel_t*)pDst,
-      (const vpixel_t*)pSrc, (const vpixel_t*)pRef,
-      (const vpixel_t*)pCompB, (const vpixel_t*)pCompF,
+    dim3 blocks(nblocks(width4, threads.x), nblocks(height, threads.y), pDstB ? 2 : 1);
+    kl_limit_over_sharpen<vpixel_t> << <blocks, threads, 0, stream >> > ((vpixel_t*)pDstA, (vpixel_t*)pDstB,
+      (const vpixel_t*)pSrcA, (const vpixel_t*)pSrcB, (const vpixel_t*)pRefA, (const vpixel_t*)pRefB,
+      (const vpixel_t*)pCompBA, (const vpixel_t*)pCompBB, (const vpixel_t*)pCompFA, (const vpixel_t*)pCompFB,
       width4, height, pitch4, ovs << scale);
     DEBUG_SYNC;
   }
@@ -2742,21 +2789,22 @@ public:
 
 template <typename vpixel_t, bool uv>
 __global__ void kl_to_full_range(
-  vpixel_t* pDst,
-  const vpixel_t* __restrict__ pSrc,
+  vpixel_t* pDstA, vpixel_t* pDstB,
+  const vpixel_t* __restrict__ pSrcA, const vpixel_t* __restrict__ pSrcB,
   int width4, int height, int pitch4
 )
 {
-  int x = threadIdx.x + blockIdx.x * blockDim.x;
-  int y = threadIdx.y + blockIdx.y * blockDim.y;
+  const int x = threadIdx.x + blockIdx.x * blockDim.x;
+  const int y = threadIdx.y + blockIdx.y * blockDim.y;
+  vpixel_t* pDst = (blockIdx.z) ? pDstB : pDstA;
+  const vpixel_t* __restrict__ pSrc = (blockIdx.z) ? pSrcB : pSrcA;
 
   if (x < width4 && y < height) {
     auto src = to_float(pSrc[x + y * pitch4]);
     float4 d;
     if (uv == false) {
       d = (src + (-16)) * (255.0f / 219.0f);
-    }
-    else {
+    } else {
       d = (src + (-128)) * (128.0f / 112.0f) + 128.0f;
     }
     auto tmp = clamp(d + 0.5f, 0, ((sizeof(pSrc[0].x) == 1) ? 255 : 65535));
@@ -2768,23 +2816,29 @@ class KTGMC_ToFullRange : public KMasktoolFilterBase
 {
 protected:
 
-  virtual void ProcPlane(int p, uint8_t* pDst,
-    const uint8_t* pSrc0, const uint8_t* pSrc1, const uint8_t* pSrc2, const uint8_t* pSrc3,
+  virtual void ProcPlane(int p, uint8_t* pDstA, uint8_t* pDstB,
+      const uint8_t* pSrc0A, const uint8_t* pSrc0B,
+      const uint8_t* pSrc1A, const uint8_t* pSrc1B,
+      const uint8_t* pSrc2A, const uint8_t* pSrc2B,
+      const uint8_t* pSrc3A, const uint8_t* pSrc3B,
     int width, int height, int pitch, cudaStream_t stream)
   {
-    ProcPlane_(p, pDst, pSrc0, width, height, pitch, stream);
+    ProcPlane_(p, pDstA, pDstB, pSrc0A, pSrc0B, width, height, pitch, stream);
   }
 
-  virtual void ProcPlane(int p, uint16_t* pDst,
-    const uint16_t* pSrc0, const uint16_t* pSrc1, const uint16_t* pSrc2, const uint16_t* pSrc3,
+  virtual void ProcPlane(int p, uint16_t* pDstA, uint16_t* pDstB,
+      const uint16_t* pSrc0A, const uint16_t* pSrc0B,
+      const uint16_t* pSrc1A, const uint16_t* pSrc1B,
+      const uint16_t* pSrc2A, const uint16_t* pSrc2B,
+      const uint16_t* pSrc3A, const uint16_t* pSrc3B,
     int width, int height, int pitch, cudaStream_t stream)
   {
-    ProcPlane_(p, pDst, pSrc0, width, height, pitch, stream);
+    ProcPlane_(p, pDstA, pDstB, pSrc0A, pSrc0B, width, height, pitch, stream);
   }
 
   template <typename pixel_t>
-  void ProcPlane_(int p, pixel_t* pDst,
-    const pixel_t* pSrc, int width, int height, int pitch, cudaStream_t stream)
+  void ProcPlane_(int p, pixel_t* pDstA, pixel_t* pDstB,
+    const pixel_t* pSrcA, const pixel_t* pSrcB, int width, int height, int pitch, cudaStream_t stream)
   {
     typedef typename VectorType<pixel_t>::type vpixel_t;
 
@@ -2792,14 +2846,14 @@ protected:
     int pitch4 = pitch / 4;
 
     dim3 threads(32, 16);
-    dim3 blocks(nblocks(width4, threads.x), nblocks(height, threads.y));
+    dim3 blocks(nblocks(width4, threads.x), nblocks(height, threads.y), pDstB ? 2 : 1);
     if (p == 0) {
       kl_to_full_range<vpixel_t, false> << <blocks, threads, 0, stream >> > (
-        (vpixel_t*)pDst, (const vpixel_t*)pSrc, width4, height, pitch4);
+        (vpixel_t*)pDstA, (vpixel_t*)pDstB, (const vpixel_t*)pSrcA, (const vpixel_t*)pSrcB, width4, height, pitch4);
     }
     else {
       kl_to_full_range<vpixel_t, true> << <blocks, threads, 0, stream >> > (
-        (vpixel_t*)pDst, (const vpixel_t*)pSrc, width4, height, pitch4);
+          (vpixel_t*)pDstA, (vpixel_t*)pDstB, (const vpixel_t*)pSrcA, (const vpixel_t*)pSrcB, width4, height, pitch4);
     }
     DEBUG_SYNC;
   }
@@ -2833,11 +2887,9 @@ __device__ float dev_lossless_proc(
   float dst;
   if ((x - half) * (y - half) < 0) {
     dst = half;
-  }
-  else if (fabsf(x - half) < fabsf(y - half)) {
+  } else if (fabsf(x - half) < fabsf(y - half)) {
     dst = x;
-  }
-  else {
+  } else {
     dst = y;
   }
   return clamp(dst, 0.0f, maxval);
@@ -2845,15 +2897,18 @@ __device__ float dev_lossless_proc(
 
 template <typename vpixel_t>
 __global__ void kl_lossless_proc(
-  vpixel_t* pDst,
-  const vpixel_t* __restrict__ pX,
-  const vpixel_t* __restrict__ pY,
+  vpixel_t* pDstA, vpixel_t* pDstB,
+  const vpixel_t* __restrict__ pXA, const vpixel_t* __restrict__ pXB,
+  const vpixel_t* __restrict__ pYA, const vpixel_t* __restrict__ pYB,
   int width4, int height, int pitch4,
   float half, float maxval
 )
 {
   int x = threadIdx.x + blockIdx.x * blockDim.x;
   int y = threadIdx.y + blockIdx.y * blockDim.y;
+  vpixel_t* pDst = (blockIdx.z) ? pDstB : pDstA;
+  const vpixel_t* __restrict__ pX = (blockIdx.z) ? pXB : pXA;
+  const vpixel_t* __restrict__ pY = (blockIdx.z) ? pYB : pYA;
 
   if (x < width4 && y < height) {
     auto valx = to_float(pX[x + y * pitch4]);
@@ -2872,23 +2927,29 @@ class KTGMC_LosslessProc : public KMasktoolFilterBase
 {
 protected:
 
-  virtual void ProcPlane(int p, uint8_t* pDst,
-    const uint8_t* pSrc0, const uint8_t* pSrc1, const uint8_t* pSrc2, const uint8_t* pSrc3,
+  virtual void ProcPlane(int p, uint8_t* pDstA, uint8_t* pDstB,
+      const uint8_t* pSrc0A, const uint8_t* pSrc0B,
+      const uint8_t* pSrc1A, const uint8_t* pSrc1B,
+      const uint8_t* pSrc2A, const uint8_t* pSrc2B,
+      const uint8_t* pSrc3A, const uint8_t* pSrc3B,
     int width, int height, int pitch, cudaStream_t stream)
   {
-    ProcPlane_(pDst, pSrc0, pSrc1, width, height, pitch, stream);
+    ProcPlane_(pDstA, pDstB, pSrc0A, pSrc0B, pSrc1A, pSrc1B, width, height, pitch, stream);
   }
 
-  virtual void ProcPlane(int p, uint16_t* pDst,
-    const uint16_t* pSrc0, const uint16_t* pSrc1, const uint16_t* pSrc2, const uint16_t* pSrc3,
+  virtual void ProcPlane(int p, uint16_t* pDstA, uint16_t* pDstB,
+      const uint16_t* pSrc0A, const uint16_t* pSrc0B,
+      const uint16_t* pSrc1A, const uint16_t* pSrc1B,
+      const uint16_t* pSrc2A, const uint16_t* pSrc2B,
+      const uint16_t* pSrc3A, const uint16_t* pSrc3B,
     int width, int height, int pitch, cudaStream_t stream)
   {
-    ProcPlane_(pDst, pSrc0, pSrc1, width, height, pitch, stream);
+    ProcPlane_(pDstA, pDstB, pSrc0A, pSrc0B, pSrc1A, pSrc1B, width, height, pitch, stream);
   }
 
   template <typename pixel_t>
-  void ProcPlane_(pixel_t* pDst,
-    const pixel_t* pX, const pixel_t* pY,
+  void ProcPlane_(pixel_t* pDstA, pixel_t* pDstB,
+    const pixel_t* pXA, const pixel_t* pXB, const pixel_t* pYA, const pixel_t* pYB,
     int width, int height, int pitch, cudaStream_t stream)
   {
     typedef typename VectorType<pixel_t>::type vpixel_t;
@@ -2901,9 +2962,9 @@ protected:
     float maxval = (float)((1 << bits) - 1);
 
     dim3 threads(32, 16);
-    dim3 blocks(nblocks(width4, threads.x), nblocks(height, threads.y));
-    kl_lossless_proc<vpixel_t> << <blocks, threads, 0, stream >> > ((vpixel_t*)pDst,
-      (const vpixel_t*)pX, (const vpixel_t*)pY,
+    dim3 blocks(nblocks(width4, threads.x), nblocks(height, threads.y), pDstB ? 2 : 1);
+    kl_lossless_proc<vpixel_t> << <blocks, threads, 0, stream >> > ((vpixel_t*)pDstA, (vpixel_t*)pDstB,
+      (const vpixel_t*)pXA, (const vpixel_t*)pXB, (const vpixel_t*)pYA,  (const vpixel_t*)pYB,
       width4, height, pitch4, range_half, maxval);
     DEBUG_SYNC;
   }
@@ -2926,15 +2987,18 @@ public:
 
 template <typename vpixel_t>
 __global__ void kl_merge(
-  vpixel_t* pDst,
-  const vpixel_t* __restrict__ pSrc0,
-  const vpixel_t* __restrict__ pSrc1,
+  vpixel_t* pDstA, vpixel_t* pDstB,
+  const vpixel_t* __restrict__ pSrc0A, const vpixel_t* __restrict__ pSrc0B,
+  const vpixel_t* __restrict__ pSrc1A, const vpixel_t* __restrict__ pSrc1B,
   int width4, int height, int pitch4,
   int weight, int invweight
 )
 {
   int x = threadIdx.x + blockIdx.x * blockDim.x;
   int y = threadIdx.y + blockIdx.y * blockDim.y;
+  vpixel_t* pDst = (blockIdx.z) ? pDstB : pDstA;
+  const vpixel_t* __restrict__ pSrc0 = (blockIdx.z) ? pSrc0B : pSrc0A;
+  const vpixel_t* __restrict__ pSrc1 = (blockIdx.z) ? pSrc1B : pSrc1A;
 
   if (x < width4 && y < height) {
     auto src0 = to_int(pSrc0[x + y * pitch4]);
@@ -2949,23 +3013,29 @@ class KMerge : public KMasktoolFilterBase
   float weight;
 protected:
 
-  virtual void ProcPlane(int p, uint8_t* pDst,
-    const uint8_t* pSrc0, const uint8_t* pSrc1, const uint8_t* pSrc2, const uint8_t* pSrc3,
+  virtual void ProcPlane(int p, uint8_t* pDstA, uint8_t* pDstB,
+      const uint8_t* pSrc0A, const uint8_t* pSrc0B,
+      const uint8_t* pSrc1A, const uint8_t* pSrc1B,
+      const uint8_t* pSrc2A, const uint8_t* pSrc2B,
+      const uint8_t* pSrc3A, const uint8_t* pSrc3B,
     int width, int height, int pitch, cudaStream_t stream)
   {
-    ProcPlane_(pDst, pSrc0, pSrc1, width, height, pitch, stream);
+    ProcPlane_(pDstA, pDstB, pSrc0A, pSrc0B, pSrc1A, pSrc1B, width, height, pitch, stream);
   }
 
-  virtual void ProcPlane(int p, uint16_t* pDst,
-    const uint16_t* pSrc0, const uint16_t* pSrc1, const uint16_t* pSrc2, const uint16_t* pSrc3,
+  virtual void ProcPlane(int p, uint16_t* pDstA, uint16_t* pDstB,
+      const uint16_t* pSrc0A, const uint16_t* pSrc0B,
+      const uint16_t* pSrc1A, const uint16_t* pSrc1B,
+      const uint16_t* pSrc2A, const uint16_t* pSrc2B,
+      const uint16_t* pSrc3A, const uint16_t* pSrc3B,
     int width, int height, int pitch, cudaStream_t stream)
   {
-    ProcPlane_(pDst, pSrc0, pSrc1, width, height, pitch, stream);
+    ProcPlane_(pDstA, pDstB, pSrc0A, pSrc0B, pSrc1A, pSrc1B, width, height, pitch, stream);
   }
 
   template <typename pixel_t>
-  void ProcPlane_(pixel_t* pDst,
-    const pixel_t* pSrc0, const pixel_t* pSrc1,
+  void ProcPlane_(pixel_t* pDstA, pixel_t* pDstB,
+    const pixel_t* pSrc0A, const pixel_t* pSrc0B, const pixel_t* pSrc1A, const pixel_t* pSrc1B,
     int width, int height, int pitch, cudaStream_t stream)
   {
     typedef typename VectorType<pixel_t>::type vpixel_t;
@@ -2974,9 +3044,9 @@ protected:
     int pitch4 = pitch / 4;
 
     dim3 threads(32, 16);
-    dim3 blocks(nblocks(width4, threads.x), nblocks(height, threads.y));
-    kl_merge<vpixel_t> << <blocks, threads, 0, stream >> > ((vpixel_t*)pDst,
-      (const vpixel_t*)pSrc0, (const vpixel_t*)pSrc1,
+    dim3 blocks(nblocks(width4, threads.x), nblocks(height, threads.y), pDstB ? 2 : 1);
+    kl_merge<vpixel_t> << <blocks, threads, 0, stream >> > ((vpixel_t*)pDstA, (vpixel_t*)pDstB,
+      (const vpixel_t*)pSrc0A, (const vpixel_t*)pSrc0B, (const vpixel_t*)pSrc1A, (const vpixel_t*)pSrc1B,
       width4, height, pitch4, (int)(weight*32767.0f), 32767 - (int)(weight*32767.0f));
     DEBUG_SYNC;
   }
@@ -3033,16 +3103,20 @@ __device__ float dev_tweak_search_clip(
 
 template <typename vpixel_t>
 __global__ void kl_tweak_search_clip(
-  vpixel_t* pDst,
-  const vpixel_t* __restrict__ pRepair,
-  const vpixel_t* __restrict__ pBobbed,
-  const vpixel_t* __restrict__ pBlur,
+  vpixel_t* pDstA, vpixel_t* pDstB,
+  const vpixel_t* __restrict__ pRepairA, const vpixel_t* __restrict__ pRepairB,
+  const vpixel_t* __restrict__ pBobbedA, const vpixel_t* __restrict__ pBobbedB,
+  const vpixel_t* __restrict__ pBlurA,   const vpixel_t* __restrict__ pBlurB,
   int width4, int height, int pitch4,
   float scale, float invscale
 )
 {
   int x = threadIdx.x + blockIdx.x * blockDim.x;
   int y = threadIdx.y + blockIdx.y * blockDim.y;
+  vpixel_t* pDst = (blockIdx.z) ? pDstB : pDstA;
+  const vpixel_t* __restrict__ pRepair = (blockIdx.z) ? pRepairB : pRepairA;
+  const vpixel_t* __restrict__ pBobbed = (blockIdx.z) ? pBobbedB : pBobbedA;
+  const vpixel_t* __restrict__ pBlur = (blockIdx.z) ? pBlurB : pBlurA;
 
   if (x < width4 && y < height) {
     auto repair = to_float(pRepair[x + y * pitch4]);
@@ -3063,23 +3137,29 @@ class KTGMC_TweakSearchClip : public KMasktoolFilterBase
 {
 protected:
 
-  virtual void ProcPlane(int p, uint8_t* pDst,
-    const uint8_t* pSrc0, const uint8_t* pSrc1, const uint8_t* pSrc2, const uint8_t* pSrc3,
+  virtual void ProcPlane(int p, uint8_t* pDstA, uint8_t* pDstB,
+      const uint8_t* pSrc0A, const uint8_t* pSrc0B,
+      const uint8_t* pSrc1A, const uint8_t* pSrc1B,
+      const uint8_t* pSrc2A, const uint8_t* pSrc2B,
+      const uint8_t* pSrc3A, const uint8_t* pSrc3B,
     int width, int height, int pitch, cudaStream_t stream)
   {
-    ProcPlane_(pDst, pSrc0, pSrc1, pSrc2, width, height, pitch, stream);
+    ProcPlane_(pDstA, pDstB, pSrc0A, pSrc0B, pSrc1A, pSrc1B, pSrc2A, pSrc2B, width, height, pitch, stream);
   }
 
-  virtual void ProcPlane(int p, uint16_t* pDst,
-    const uint16_t* pSrc0, const uint16_t* pSrc1, const uint16_t* pSrc2, const uint16_t* pSrc3,
+  virtual void ProcPlane(int p, uint16_t* pDstA, uint16_t* pDstB,
+      const uint16_t* pSrc0A, const uint16_t* pSrc0B,
+      const uint16_t* pSrc1A, const uint16_t* pSrc1B,
+      const uint16_t* pSrc2A, const uint16_t* pSrc2B,
+      const uint16_t* pSrc3A, const uint16_t* pSrc3B,
     int width, int height, int pitch, cudaStream_t stream)
   {
-    ProcPlane_(pDst, pSrc0, pSrc1, pSrc2, width, height, pitch, stream);
+    ProcPlane_(pDstA, pDstB, pSrc0A, pSrc0B, pSrc1A, pSrc1B, pSrc2A, pSrc2B, width, height, pitch, stream);
   }
 
   template <typename pixel_t>
-  void ProcPlane_(pixel_t* pDst,
-    const pixel_t* pRepair, const pixel_t* pBobbed, const pixel_t* pBlur,
+  void ProcPlane_(pixel_t* pDstA, pixel_t* pDstB,
+    const pixel_t* pRepairA, const pixel_t* pRepairB, const pixel_t* pBobbedA, const pixel_t* pBobbedB, const pixel_t* pBlurA, const pixel_t* pBlurB,
     int width, int height, int pitch, cudaStream_t stream)
   {
     typedef typename VectorType<pixel_t>::type vpixel_t;
@@ -3092,9 +3172,9 @@ protected:
     float invscale = 1.f / scale;
 
     dim3 threads(32, 16);
-    dim3 blocks(nblocks(width4, threads.x), nblocks(height, threads.y));
-    kl_tweak_search_clip<vpixel_t> << <blocks, threads, 0, stream >> > ((vpixel_t*)pDst,
-      (const vpixel_t*)pRepair, (const vpixel_t*)pBobbed, (const vpixel_t*)pBlur,
+    dim3 blocks(nblocks(width4, threads.x), nblocks(height, threads.y), pDstB ? 2 : 1);
+    kl_tweak_search_clip<vpixel_t> << <blocks, threads, 0, stream >> > ((vpixel_t*)pDstA, (vpixel_t*)pDstB,
+      (const vpixel_t*)pRepairA, (const vpixel_t*)pRepairB, (const vpixel_t*)pBobbedA, (const vpixel_t*)pBobbedB, (const vpixel_t*)pBlurA, (const vpixel_t*)pBlurB,
       width4, height, pitch4, scale, invscale);
     DEBUG_SYNC;
   }
@@ -3118,15 +3198,18 @@ public:
 
 template <typename vpixel_t>
 __global__ void kl_error_adjust(
-  vpixel_t* pDst,
-  const vpixel_t* __restrict__ pSrc0,
-  const vpixel_t* __restrict__ pSrc1,
+  vpixel_t* pDstA, vpixel_t* pDstB,
+  const vpixel_t* __restrict__ pSrc0A, const vpixel_t* __restrict__ pSrc0B,
+  const vpixel_t* __restrict__ pSrc1A, const vpixel_t* __restrict__ pSrc1B,
   int width4, int height, int pitch4,
   float errorAdj
 )
 {
   int x = threadIdx.x + blockIdx.x * blockDim.x;
   int y = threadIdx.y + blockIdx.y * blockDim.y;
+  vpixel_t* pDst = (blockIdx.z) ? pDstB : pDstA;
+  const vpixel_t* __restrict__ pSrc0 = (blockIdx.z) ? pSrc0B : pSrc0A;
+  const vpixel_t* __restrict__ pSrc1 = (blockIdx.z) ? pSrc1B : pSrc1A;
 
   if (x < width4 && y < height) {
     auto srcx = to_float(pSrc0[x + y * pitch4]);
@@ -3143,23 +3226,29 @@ class KTGMC_ErrorAdjust : public KMasktoolFilterBase
   float errorAdj;
 protected:
 
-  virtual void ProcPlane(int p, uint8_t* pDst,
-    const uint8_t* pSrc0, const uint8_t* pSrc1, const uint8_t* pSrc2, const uint8_t* pSrc3,
+  virtual void ProcPlane(int p, uint8_t* pDstA, uint8_t* pDstB,
+      const uint8_t* pSrc0A, const uint8_t* pSrc0B,
+      const uint8_t* pSrc1A, const uint8_t* pSrc1B,
+      const uint8_t* pSrc2A, const uint8_t* pSrc2B,
+      const uint8_t* pSrc3A, const uint8_t* pSrc3B,
     int width, int height, int pitch, cudaStream_t stream)
   {
-    ProcPlane_(pDst, pSrc0, pSrc1, width, height, pitch, stream);
+    ProcPlane_(pDstA, pDstB, pSrc0A, pSrc0B, pSrc1A, pSrc1B, width, height, pitch, stream);
   }
 
-  virtual void ProcPlane(int p, uint16_t* pDst,
-    const uint16_t* pSrc0, const uint16_t* pSrc1, const uint16_t* pSrc2, const uint16_t* pSrc3,
+  virtual void ProcPlane(int p, uint16_t* pDstA, uint16_t* pDstB,
+      const uint16_t* pSrc0A, const uint16_t* pSrc0B,
+      const uint16_t* pSrc1A, const uint16_t* pSrc1B,
+      const uint16_t* pSrc2A, const uint16_t* pSrc2B,
+      const uint16_t* pSrc3A, const uint16_t* pSrc3B,
     int width, int height, int pitch, cudaStream_t stream)
   {
-    ProcPlane_(pDst, pSrc0, pSrc1, width, height, pitch, stream);
+    ProcPlane_(pDstA, pDstB, pSrc0A, pSrc0B, pSrc1A, pSrc1B, width, height, pitch, stream);
   }
 
   template <typename pixel_t>
-  void ProcPlane_(pixel_t* pDst,
-    const pixel_t* pSrc0, const pixel_t* pSrc1,
+  void ProcPlane_(pixel_t* pDstA, pixel_t* pDstB,
+    const pixel_t* pSrc0A, const pixel_t* pSrc0B, const pixel_t* pSrc1A, const pixel_t* pSrc1B,
     int width, int height, int pitch, cudaStream_t stream)
   {
     typedef typename VectorType<pixel_t>::type vpixel_t;
@@ -3168,9 +3257,9 @@ protected:
     int pitch4 = pitch / 4;
 
     dim3 threads(32, 16);
-    dim3 blocks(nblocks(width4, threads.x), nblocks(height, threads.y));
-    kl_error_adjust<vpixel_t> << <blocks, threads, 0, stream >> > ((vpixel_t*)pDst,
-      (const vpixel_t*)pSrc0, (const vpixel_t*)pSrc1,
+    dim3 blocks(nblocks(width4, threads.x), nblocks(height, threads.y), pDstB ? 2 : 1);
+    kl_error_adjust<vpixel_t> << <blocks, threads, 0, stream >> > ((vpixel_t*)pDstA, (vpixel_t*)pDstB,
+      (const vpixel_t*)pSrc0A, (const vpixel_t*)pSrc0B, (const vpixel_t*)pSrc1A, (const vpixel_t*)pSrc1B,
       width4, height, pitch4, errorAdj);
     DEBUG_SYNC;
   }
