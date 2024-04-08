@@ -3343,7 +3343,7 @@ class KCopy : public GenericVideoFilter
 
     for (int p = 0; p < 3; ++p) {
       if (IS_CUDA) {
-        const auto planeStream = (cudaStream_t)GetDeviceStreamPlane(p);
+        const auto planeStream = (ENABLE_MULTI_STREAM) ? (cudaStream_t)GetDeviceStreamPlane(p) : stream;
         const vpixel_t* pSrc = reinterpret_cast<const vpixel_t*>(src->GetReadPtr(planes[p]));
         vpixel_t* pDst = reinterpret_cast<vpixel_t*>(dst->GetWritePtr(planes[p]));
         int srcPitch4 = src->GetPitch(planes[p]) / sizeof(vpixel_t);
