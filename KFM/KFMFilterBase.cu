@@ -639,13 +639,13 @@ void KFMFilterBase::CopyFrameAndPad(Frame& src, Frame& dst, PNeoEnv env)
     {
       dim3 threads(32, 8);
       dim3 blocks(nblocks(srcvi.width, threads.x * 4), nblocks(srcvi.height + 2 * VPAD, threads.y));
-      kl_copy_pad<vpixel_t> <<<blocks, threads, 0, stream >>> ((vpixel_t *)(dstY + VPAD * dstPitchY), dstPitchY >> 2, (vpixel_t *)srcY, srcPitchY >> 2, width4, srcvi.height, 0, VPAD);
+      kl_copy_pad<vpixel_t> <<<blocks, threads, 0, stream >>> ((vpixel_t *)dstY, dstPitchY >> 2, (vpixel_t *)srcY, srcPitchY >> 2, width4, srcvi.height, 0, VPAD);
     }
     {
       dim3 threads(32, 8);
       dim3 blocks(nblocks(widthUV, threads.x * 4), nblocks(heightUV + 2 * vpadUV, threads.y));
-      kl_copy_pad<vpixel_t> <<<blocks, threads, 0, stream >>> ((vpixel_t *)(dstU + vpadUV * dstPitchUV), dstPitchUV >> 2, (vpixel_t *)srcU, srcPitchUV >> 2, width4UV, heightUV, 0, vpadUV);
-      kl_copy_pad<vpixel_t> <<<blocks, threads, 0, stream >>> ((vpixel_t *)(dstV + vpadUV * dstPitchUV), dstPitchUV >> 2, (vpixel_t *)srcV, srcPitchUV >> 2, width4UV, heightUV, 0, vpadUV);
+      kl_copy_pad<vpixel_t> <<<blocks, threads, 0, stream >>> ((vpixel_t *)dstU, dstPitchUV >> 2, (vpixel_t *)srcU, srcPitchUV >> 2, width4UV, heightUV, 0, vpadUV);
+      kl_copy_pad<vpixel_t> <<<blocks, threads, 0, stream >>> ((vpixel_t *)dstV, dstPitchUV >> 2, (vpixel_t *)srcV, srcPitchUV >> 2, width4UV, heightUV, 0, vpadUV);
     }
   } else {
     Copy(dstY, dstPitchY, srcY, srcPitchY, srcvi.width, srcvi.height, env);
