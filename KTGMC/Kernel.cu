@@ -2347,8 +2347,8 @@ __global__ void kl_box3_v(
 
     if (x < width4 && y < height) {
         auto v1 = to_int(pSrc[x + (y + 0) * pitch4]);
-        auto v0 = (1 <= y)         ? v1 : to_int(pSrc[x + (y - 1) * pitch4]);
-        auto v2 = (y < height - 1) ? v1 : to_int(pSrc[x + (y + 1) * pitch4]);
+        auto v0 = (y == 0)          ? v1 : to_int(pSrc[x + (y - 1) * pitch4]);
+        auto v2 = (y == height - 1) ? v1 : to_int(pSrc[x + (y + 1) * pitch4]);
         auto tmp = f(v0, v1, v2);
         pDst[x + y * pitch4] = VHelper<vpixel_t>::cast_to(tmp);
     }
