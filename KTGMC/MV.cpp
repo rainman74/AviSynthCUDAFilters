@@ -721,7 +721,7 @@ public:
 
     for (int i = 0; i < param->nLevels - 1; i++)
     {
-#if 0
+#if 1
       pFrames[i]->ReduceTo(pFrames[i + 1].get());
       pFrames[i + 1]->Pad();
 #else
