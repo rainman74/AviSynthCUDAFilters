@@ -586,11 +586,17 @@ __global__ void kl_calculate_sad(
   }
   float *sad = ((blockIdx.z) ? sad1 : sad0) + blockIdx.y;
 
-  float tmpsad = 0;
+  int sum = 0;
   for (int x = threadIdx.x; x < width4; x += blockDim.x) {
-    int4 p = absdiff(pA[x + y * pitch4], pB[x + y * pitch4]);
-    tmpsad += p.x + p.y + p.z + p.w;
+      if (sizeof(vpixel_t) == sizeof(unsigned int)) {
+          sum = __vabsdiff4(*(unsigned int*)&pA[x + y * pitch4], *(unsigned int*)&pB[x + y * pitch4], sum);
+      } else {
+          int4 p = absdiff(pA[x + y * pitch4], pB[x + y * pitch4]);
+          sum += p.x + p.y + p.z + p.w;
+      }
   }
+
+  float tmpsad = sum;
 
   __shared__ float sbuf[CALC_SAD_THREADS];
   dev_reduce<float, CALC_SAD_THREADS, AddReducer<float>>(threadIdx.x, tmpsad, sbuf);

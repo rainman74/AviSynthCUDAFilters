@@ -354,12 +354,6 @@ __device__ const pixel_t* dev_get_ref_block(const pixel_t* pRef, int nPitch, int
   }
 }
 
-__device__ unsigned int __vabsdiff4(unsigned int srcA, unsigned int srcB, unsigned int c) {
-    unsigned int d;
-    asm volatile("vabsdiff4.u32.u32.u32.add %0,%1,%2,%3;":"=r"(d) : "r"(srcA), "r"(srcB), "r"(c));
-    return d;
-}
-
 template <typename pixel_t>
 __device__ unsigned int load4pix(const pixel_t *ptr, int x, int y, int pitch, int offset) {
     // 4バイト境界になるようにオフセットを加算してロード

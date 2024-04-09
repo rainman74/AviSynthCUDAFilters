@@ -263,6 +263,12 @@ static __device__ __host__ int4 absdiff(uchar4 a, uchar4 b) {
   return r2;
 }
 
+static __device__ unsigned int __vabsdiff4(unsigned int srcA, unsigned int srcB, unsigned int c) {
+	unsigned int d;
+	asm volatile("vabsdiff4.u32.u32.u32.add %0,%1,%2,%3;":"=r"(d) : "r"(srcA), "r"(srcB), "r"(c));
+	return d;
+}
+
 static __device__ __host__ int4 absdiff(ushort4 a, ushort4 b) {
   int4 r = { a.x - b.x, a.y - b.y, a.z - b.z, a.w - b.w };
   int4 r2 = {
