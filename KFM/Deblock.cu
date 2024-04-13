@@ -1043,7 +1043,7 @@ class QPForDeblock : public KFMFilterBase
 public:
     QPForDeblock(PClip source, float b_ratio,
         PClip qpclip, int force_qp, bool b_adap, IScriptEnvironment* env)
-        : KFMFilterBase(source)
+        : KFMFilterBase(source, env)
         , qpclip(qpclip)
         , b_ratio(b_ratio)
         , force_qp(force_qp)
@@ -1454,7 +1454,7 @@ class SharpenFilter : public KFMFilterBase
 
 public:
     SharpenFilter(PClip source, PClip qpclip, PClip unsharp, bool show, IScriptEnvironment* env)
-        : KFMFilterBase(source)
+        : KFMFilterBase(source, env)
         , qpclip(qpclip)
         , unsharpclip(unsharp)
         , show(show)
@@ -1711,7 +1711,7 @@ class KDeblock : public KFMFilterBase
 public:
     KDeblock(PClip source, int quality, float strength, float qp_thresh,
         PClip qpclip, int show, IScriptEnvironment* env)
-        : KFMFilterBase(source)
+        : KFMFilterBase(source, env)
         , qpclip(qpclip)
         , quality(quality)
         , strength(strength)
