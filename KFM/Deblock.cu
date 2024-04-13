@@ -855,14 +855,14 @@ class QPForDeblock : public KFMFilterBase
         const uint8_t* qpTable0, const uint8_t* qpTableNonB0, Frame dc0,
         const uint8_t* qpTable1, const uint8_t* qpTableNonB1, Frame dc1,
         int qpStride, int qpScaleType,
-        int qpShiftX, int qpShiftY, int planeIdx, PNeoEnv env)
+        int qpShiftX, int qpShiftY, PNeoEnv env)
     {
         float dc_coeff = b_ratio / 255.0f;
         int qp_width = (width + 7 + 8) >> 3;
         int qp_height = (height + 7 + 8) >> 3;
 
         if (IS_CUDA) {
-            cudaStream_t stream = (cudaStream_t)GetDeviceStreamPlane(planeIdx);
+            cudaStream_t stream = static_cast<cudaStream_t>(env->GetDeviceStream());
             dim3 threads(32, 8);
             dim3 blocks(nblocks(qp_width, threads.x), nblocks(qp_height, threads.y));
             kl_make_qp_table <<<blocks, threads, 0, stream>>> (
@@ -974,24 +974,20 @@ class QPForDeblock : public KFMFilterBase
         Frame bmask0 = dc0 ? MakeMask(dc0, env) : Frame();
         Frame bmask1 = dc1 ? MakeMask(dc1, env) : Frame();
 
-        auto planeEvent = CreateEventPlanes();
-
         QPForPlane(srcvi.width, srcvi.height,
             dst.GetWritePtr<uint16_t>(PLANAR_Y), dst.GetPitch<uint16_t>(PLANAR_Y),
             qpTable0, qpTableNonB0, bmask0, qpTable1, qpTableNonB1, bmask1,
-            qpStride, qpScaleType, 1, 1, 0, env);
+            qpStride, qpScaleType, 1, 1, env);
 
         QPForPlane(srcvi.width >> logUVx, srcvi.height >> logUVy,
             dst.GetWritePtr<uint16_t>(PLANAR_U), dst.GetPitch<uint16_t>(PLANAR_U),
             qpTable0, qpTableNonB0, bmask0, qpTable1, qpTableNonB1, bmask1,
-            qpStride, qpScaleType, 1 - logUVx, 1 - logUVy, 1, env);
+            qpStride, qpScaleType, 1 - logUVx, 1 - logUVy, env);
 
         QPForPlane(srcvi.width >> logUVx, srcvi.height >> logUVy,
             dst.GetWritePtr<uint16_t>(PLANAR_V), dst.GetPitch<uint16_t>(PLANAR_V),
             qpTable0, qpTableNonB0, bmask0, qpTable1, qpTableNonB1, bmask1,
-            qpStride, qpScaleType, 1 - logUVx, 1 - logUVy, 2, env);
-
-        planeEvent->finPlane();
+            qpStride, qpScaleType, 1 - logUVx, 1 - logUVy, env);
 
         dst.SetProperty("DEBLOCK_QP_FLAG",
             (int)(bmask0 ? QP_TABLE_USING_DC : qpTable0 ? QP_TABLE_ONLY : QP_TABLE_CONSTANT));
@@ -1047,7 +1043,7 @@ class QPForDeblock : public KFMFilterBase
 public:
     QPForDeblock(PClip source, float b_ratio,
         PClip qpclip, int force_qp, bool b_adap, IScriptEnvironment* env)
-        : KFMFilterBase(source, env)
+        : KFMFilterBase(source)
         , qpclip(qpclip)
         , b_ratio(b_ratio)
         , force_qp(force_qp)
@@ -1458,7 +1454,7 @@ class SharpenFilter : public KFMFilterBase
 
 public:
     SharpenFilter(PClip source, PClip qpclip, PClip unsharp, bool show, IScriptEnvironment* env)
-        : KFMFilterBase(source, env)
+        : KFMFilterBase(source)
         , qpclip(qpclip)
         , unsharpclip(unsharp)
         , show(show)
@@ -1509,39 +1505,50 @@ class KDeblock : public KFMFilterBase
     template <typename pixel_t>
     void DeblockPlane(
         int width, int height,
-        pixel_t* dst, int dstPitch, pixel_t* pad, int padPitch, uint16_t* tmpout, int tmpoutPitch, const pixel_t* src, int srcPitch,
-        const uint16_t* qpTmp, int qpTmpPitch, cudaStream_t stream, PNeoEnv env)
+        pixel_t* dst, int dstPitch, const pixel_t* src, int srcPitch,
+        const uint16_t* qpTmp, int qpTmpPitch, PNeoEnv env)
     {
         typedef typename VectorType<pixel_t>::type vpixel_t;
+        cudaStream_t stream = static_cast<cudaStream_t>(env->GetDeviceStream());
+
+        VideoInfo padvi = vi;
+        // 有効なデータは外周8ピクセルまでだが、
+        // 8の倍数でないときにさらにその外までアクセスが有り得るので
+        // アクセス可能な状態にしておく。8ピクセルより外側はアクセスがあったとしても
+        // 最終フレームには算入されないので、padしなくて良い
+        padvi.width = (width + 7 + 8 * 2) & ~7;
+        padvi.height = (height + 7 + 8 * 2) & ~7;
+        padvi.pixel_type = GetYType(vi);
+        Frame pad = env->NewVideoFrame(padvi);
 
         if (IS_CUDA) {
             if (true) {
                 dim3 threads(32, 8);
                 dim3 blocks(nblocks(width + 2*8, threads.x*4), nblocks(height + 2 * 8, threads.y));
-                kl_copy_pad<vpixel_t><<<blocks, threads, 0, stream>>>((vpixel_t *)(pad + 8 + 8 * padPitch),
-                    padPitch >> 2, (vpixel_t *)src, srcPitch >> 2, width >> 2, height, 8 >> 2, 8);
+                kl_copy_pad<vpixel_t><<<blocks, threads, 0, stream>>>((vpixel_t *)(pad.GetWritePtr<pixel_t>() + 8 + 8 * pad.GetPitch<pixel_t>()),
+                    pad.GetPitch<pixel_t>() >> 2, (vpixel_t *)src, srcPitch >> 2, width >> 2, height, 8 >> 2, 8);
                 DEBUG_SYNC;
             } else {
-                Copy(pad + 8 + 8 * padPitch,
-                    padPitch, src, srcPitch, width, height, env);
+                Copy(pad.GetWritePtr<pixel_t>() + 8 + 8 * pad.GetPitch<pixel_t>(),
+                    pad.GetPitch<pixel_t>(), src, srcPitch, width, height, env);
                 kl_padv<vpixel_t> <<<dim3(nblocks(width >> 2, 32)), dim3(32, 8), 0, stream>>> (
-                    (vpixel_t *)(pad + 8 + 8 * padPitch),
-                    width >> 2, height, padPitch >> 2, 8);
+                    pad.GetWritePtr<vpixel_t>() + 2 + 8 * pad.GetPitch<vpixel_t>(),
+                    width >> 2, height, pad.GetPitch<vpixel_t>(), 8);
                 DEBUG_SYNC;
                 kl_padh<pixel_t> <<<dim3(1, nblocks(height + 8 * 2, 32)), dim3(8, 32), 0, stream>>> (
-                    pad + 8, width, height + 8 * 2,
-                    padPitch, 8);
+                    pad.GetWritePtr<pixel_t>() + 8, width, height + 8 * 2,
+                    pad.GetPitch<pixel_t>(), 8);
                 DEBUG_SYNC;
             }
         } else {
-            Copy(pad + 8 + 8 * padPitch,
-                padPitch, src, srcPitch, width, height, env);
+            Copy(pad.GetWritePtr<pixel_t>() + 8 + 8 * pad.GetPitch<pixel_t>(),
+                pad.GetPitch<pixel_t>(), src, srcPitch, width, height, env);
             cpu_padv<vpixel_t>(
-                (vpixel_t *)(pad + 8 + 8 * padPitch),
-                width >> 2, height, padPitch >> 2, 8);
+                pad.GetWritePtr<vpixel_t>() + 2 + 8 * pad.GetPitch<vpixel_t>(),
+                width >> 2, height, pad.GetPitch<vpixel_t>(), 8);
             cpu_padh<pixel_t>(
-                pad + 8, width, height + 8 * 2,
-                padPitch, 8);
+                pad.GetWritePtr<pixel_t>() + 8, width, height + 8 * 2,
+                pad.GetPitch<pixel_t>(), 8);
         }
 
         // qpclipのviはchromaも考慮して大き目になっているので、そのままでは使えないことに注意
@@ -1572,29 +1579,40 @@ class KDeblock : public KFMFilterBase
         } else if (!IS_CUDA && IsAVX2Available()) {
             //if(false) {
               // CPUでAVX2が使えるならAVX2版
+            VideoInfo tmpvi = vi;
+            tmpvi.width = (width + 7 + 8 * 2) & ~7;
+            tmpvi.height = (height + 7 + 8 * 2) & ~7;
+            tmpvi.pixel_type = VideoInfo::CS_Y16;
+            Frame tmpOut = env->NewVideoFrame(tmpvi);
 
-            cpu_deblock_avx(pad, padPitch,
+            cpu_deblock_avx(pad.GetReadPtr<pixel_t>(), pad.GetPitch<pixel_t>(),
                 qpvi.width, qpvi.height,
-                ((uint16_t *)tmpout), tmpoutPitch,
+                tmpOut.GetWritePtr<uint16_t>(), tmpOut.GetPitch<uint16_t>(),
                 qpTmp, qpTmpPitch, count - 1,
                 deblockShift, deblockMaxV, strength, thresh_a, thresh_b,
                 width, height, dst, dstPitch, mergeShift, mergeMaxV);
         } else {
+            VideoInfo tmpvi = vi;
+            tmpvi.width = (width + 7 + 8 * 2) & ~7;
+            tmpvi.height = (height + 7 + 8 * 2) & ~7;
+            tmpvi.height *= 4;
+            tmpvi.pixel_type = VideoInfo::CS_Y16;
+            Frame tmpOut = env->NewVideoFrame(tmpvi);
 
             if (IS_CUDA) {
                 dim3 threads(8, count);
                 dim3 blocks(qpvi.width, qpvi.height);
                 kl_deblock <<<blocks, threads, sizeof(float) * 72 * count, stream>>> (
-                    pad, padPitch,
+                    pad.GetReadPtr<pixel_t>(), pad.GetPitch<pixel_t>(),
                     qpvi.width, qpvi.height,
-                    ((ushort2 *)tmpout), (tmpoutPitch / 2),
+                    tmpOut.GetWritePtr<ushort2>(), tmpOut.GetPitch<ushort2>(),
                     qpTmp, qpTmpPitch, count - 1,
                     deblockShift, deblockMaxV, strength, thresh_a, thresh_b);
                 DEBUG_SYNC;
             } else {
-                cpu_deblock(pad, padPitch,
+                cpu_deblock(pad.GetReadPtr<pixel_t>(), pad.GetPitch<pixel_t>(),
                     qpvi.width, qpvi.height,
-                    ((uint16_t *)tmpout), tmpoutPitch,
+                    tmpOut.GetWritePtr<uint16_t>(), tmpOut.GetPitch<uint16_t>(),
                     qpTmp, qpTmpPitch, count - 1,
                     deblockShift, deblockMaxV, strength, thresh_a, thresh_b);
             }
@@ -1602,15 +1620,15 @@ class KDeblock : public KFMFilterBase
             if (IS_CUDA) {
                 dim3 threads(32, 8);
                 dim3 blocks(nblocks(width >> 2, threads.x), nblocks(height, threads.y));
-                kl_merge_deblock <<<blocks, threads, 0, stream >>> (width >> 2, height,
-                    ((ushort4 *)tmpout) + 2 + 8 * (tmpoutPitch / 4),
-                    (tmpoutPitch / 4), qpvi.height * 8,
+                kl_merge_deblock <<<blocks, threads>>> (width >> 2, height,
+                    tmpOut.GetReadPtr<ushort4>() + 2 + 8 * tmpOut.GetPitch<ushort4>(),
+                    tmpOut.GetPitch<ushort4>(), qpvi.height * 8,
                     (vpixel_t*)dst, dstPitch >> 2, mergeShift, (float)mergeMaxV);
                 DEBUG_SYNC;
             } else {
                 cpu_merge_deblock(width >> 2, height,
-                    ((ushort4 *)tmpout) + 2 + 8 * (tmpoutPitch / 4),
-                    (tmpoutPitch / 4), qpvi.height * 8,
+                    tmpOut.GetReadPtr<ushort4>() + 2 + 8 * tmpOut.GetPitch<ushort4>(),
+                    tmpOut.GetPitch<ushort4>(), qpvi.height * 8,
                     (vpixel_t*)dst, dstPitch >> 2, mergeShift, (float)mergeMaxV);
             }
         }
@@ -1652,53 +1670,20 @@ class KDeblock : public KFMFilterBase
 
         Frame dst = env->NewVideoFrame(vi);
 
-        const int planeMax = 3;
-        Frame pad[planeMax], tmpOut[planeMax];
-        for (int i = 0; i < planeMax; i++) {
-            const int width  = vi.width  >> (i > 0 ? logUVx : 0);
-            const int height = vi.height >> (i > 0 ? logUVy : 0);
-            VideoInfo padvi = vi;
-            // 有効なデータは外周8ピクセルまでだが、
-            // 8の倍数でないときにさらにその外までアクセスが有り得るので
-            // アクセス可能な状態にしておく。8ピクセルより外側はアクセスがあったとしても
-            // 最終フレームには算入されないので、padしなくて良い
-            padvi.width = (width + 7 + 8 * 2) & ~7;
-            padvi.height = (height + 7 + 8 * 2) & ~7;
-            padvi.pixel_type = GetYType(vi);
-            pad[i] = env->NewVideoFrame(padvi);
-
-            VideoInfo tmpvi = vi;
-            tmpvi.width = (width + 7 + 8 * 2) & ~7;
-            tmpvi.height = (height + 7 + 8 * 2) & ~7;
-            tmpvi.height *= 4;
-            tmpvi.pixel_type = VideoInfo::CS_Y16;
-            tmpOut[i] = env->NewVideoFrame(tmpvi);
-        }
-
-        auto planeEvent = CreateEventPlanes();
-
         DeblockPlane(vi.width, vi.height,
             dst.GetWritePtr<pixel_t>(PLANAR_Y), dst.GetPitch<pixel_t>(PLANAR_Y),
-            pad[0].GetWritePtr<pixel_t>(), pad[0].GetPitch<pixel_t>(),
-            tmpOut[0].GetWritePtr<uint16_t>(), tmpOut[0].GetPitch<uint16_t>(),
             src.GetReadPtr<pixel_t>(PLANAR_Y), src.GetPitch<pixel_t>(PLANAR_Y),
-            qp.GetReadPtr<uint16_t>(PLANAR_Y), qp.GetPitch<uint16_t>(PLANAR_Y), (cudaStream_t)GetDeviceStreamPlane(0), env);
+            qp.GetReadPtr<uint16_t>(PLANAR_Y), qp.GetPitch<uint16_t>(PLANAR_Y), env);
 
         DeblockPlane(vi.width >> logUVx, vi.height >> logUVy,
             dst.GetWritePtr<pixel_t>(PLANAR_U), dst.GetPitch<pixel_t>(PLANAR_U),
-            pad[1].GetWritePtr<pixel_t>(), pad[1].GetPitch<pixel_t>(),
-            tmpOut[1].GetWritePtr<uint16_t>(), tmpOut[1].GetPitch<uint16_t>(),
             src.GetReadPtr<pixel_t>(PLANAR_U), src.GetPitch<pixel_t>(PLANAR_U),
-            qp.GetReadPtr<uint16_t>(PLANAR_U), qp.GetPitch<uint16_t>(PLANAR_U), (cudaStream_t)GetDeviceStreamPlane(1), env);
+            qp.GetReadPtr<uint16_t>(PLANAR_U), qp.GetPitch<uint16_t>(PLANAR_U), env);
 
         DeblockPlane(vi.width >> logUVx, vi.height >> logUVy,
             dst.GetWritePtr<pixel_t>(PLANAR_V), dst.GetPitch<pixel_t>(PLANAR_V),
-            pad[2].GetWritePtr<pixel_t>(), pad[2].GetPitch<pixel_t>(),
-            tmpOut[2].GetWritePtr<uint16_t>(), tmpOut[2].GetPitch<uint16_t>(),
             src.GetReadPtr<pixel_t>(PLANAR_V), src.GetPitch<pixel_t>(PLANAR_V),
-            qp.GetReadPtr<uint16_t>(PLANAR_V), qp.GetPitch<uint16_t>(PLANAR_V), (cudaStream_t)GetDeviceStreamPlane(2), env);
-
-        if (planeEvent) planeEvent->finPlane();
+            qp.GetReadPtr<uint16_t>(PLANAR_V), qp.GetPitch<uint16_t>(PLANAR_V), env);
 
         if (show == 1) {
             ShowQPFlag<pixel_t>(dst, qpflag, env);
@@ -1726,7 +1711,7 @@ class KDeblock : public KFMFilterBase
 public:
     KDeblock(PClip source, int quality, float strength, float qp_thresh,
         PClip qpclip, int show, IScriptEnvironment* env)
-        : KFMFilterBase(source, env)
+        : KFMFilterBase(source)
         , qpclip(qpclip)
         , quality(quality)
         , strength(strength)
