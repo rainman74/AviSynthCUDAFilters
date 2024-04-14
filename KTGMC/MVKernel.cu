@@ -365,6 +365,12 @@ __device__ unsigned int load4pix(const pixel_t *ptr, int x, int y, int pitch, in
     }
     return ret;
 }
+template <typename pixel_t>
+__device__ unsigned int load4pixAligned(const pixel_t *ptr, int x, int y, int pitch) {
+    // 4バイト境界になるようにオフセットを加算してロード
+    unsigned int ret = *(unsigned int*)&ptr[x + y * pitch];
+    return ret;
+}
 
 template <typename pixel_t, int BLK_SIZE, bool CHROMA>
 __device__ sad_t dev_calc_sad(
@@ -385,12 +391,11 @@ __device__ sad_t dev_calc_sad(
     const int yx = (wi % threadPerLine) * step; // 1行の中での位置
           int yy =  wi / threadPerLine;          // 担当する行
     const int ystep = threadnum / threadPerLine;
-    const int srcYoffset = ((uint32_t)(size_t)pSrcY) & (sizeof(uchar4) - 1); // 4バイト境界になるようにオフセットを計算
     const int refYoffset = ((uint32_t)(size_t)pRefY) & (sizeof(uchar4) - 1); // 4バイト境界になるようにオフセットを計算
     #pragma unroll
     for (int i = 0; i < BLK_SIZE; i += ystep, yy += ystep) { // 4回ループ
-        unsigned int src4 = load4pix(pSrcY, yx, yy, BLK_SIZE, srcYoffset);
-        unsigned int ref4 = load4pix(pRefY, yx, yy, nPitchY,  refYoffset);
+        unsigned int src4 = load4pixAligned(pSrcY, yx, yy, BLK_SIZE);
+        unsigned int ref4 = load4pix(pRefY, yx, yy, nPitchY, refYoffset);
         sad = __vabsdiff4(src4, ref4, sad);
     }
   } else {
@@ -407,19 +412,17 @@ __device__ sad_t dev_calc_sad(
         const int uvx = (wi % threadPerLine) * step; // 1行の中での位置
               int uvy =  wi / threadPerLine;          // 担当する行
         const int ystep = threadnum / threadPerLine;
-        const int srcUoffset = ((uint32_t)(size_t)pSrcU) & (sizeof(uchar4) - 1); // 4バイト境界になるようにオフセットを計算
         const int refUoffset = ((uint32_t)(size_t)pRefU) & (sizeof(uchar4) - 1); // 4バイト境界になるようにオフセットを計算
-        const int srcVoffset = ((uint32_t)(size_t)pSrcV) & (sizeof(uchar4) - 1); // 4バイト境界になるようにオフセットを計算
         const int refVoffset = ((uint32_t)(size_t)pRefV) & (sizeof(uchar4) - 1); // 4バイト境界になるようにオフセットを計算
         #pragma unroll
         for (int t = 0; t < BLK_SIZE_UV; t += ystep, uvy += ystep) { // 1回ループ
             unsigned int src4, ref4;
-            src4 = load4pix(pSrcU, uvx, uvy, BLK_SIZE_UV, srcUoffset);
-            ref4 = load4pix(pRefU, uvx, uvy, nPitchU,     refUoffset);
+            src4 = load4pixAligned(pSrcU, uvx, uvy, BLK_SIZE_UV);
+            ref4 = load4pix(pRefU, uvx, uvy, nPitchU, refUoffset);
             sad = __vabsdiff4(src4, ref4, sad);
             // -------------------------------------------------------------------------------
-            src4 = load4pix(pSrcV, uvx, uvy, BLK_SIZE_UV, srcVoffset);
-            ref4 = load4pix(pRefV, uvx, uvy, nPitchV,     refVoffset);
+            src4 = load4pixAligned(pSrcV, uvx, uvy, BLK_SIZE_UV);
+            ref4 = load4pix(pRefV, uvx, uvy, nPitchV, refVoffset);
             sad = __vabsdiff4(src4, ref4, sad);
         }
     } else {
@@ -888,9 +891,9 @@ __global__ void kl_search(
       int offx = nPad + blkx * BLK_STEP;
       int offy = nPad + blky * BLK_STEP;
 
-      __shared__ pixel_t srcY[BLK_SIZE * BLK_SIZE];
-      __shared__ pixel_t srcU[BLK_SIZE_UV * BLK_SIZE_UV];
-      __shared__ pixel_t srcV[BLK_SIZE_UV * BLK_SIZE_UV];
+      __shared__ __align__(4) pixel_t srcY[BLK_SIZE * BLK_SIZE];
+      __shared__ __align__(4) pixel_t srcU[BLK_SIZE_UV * BLK_SIZE_UV];
+      __shared__ __align__(4) pixel_t srcV[BLK_SIZE_UV * BLK_SIZE_UV];
 
       dev_read_pixels<pixel_t, BLK_SIZE, CHROMA>(tx,
         d.d.pSrcY, d.d.pSrcU, d.d.pSrcV, srcY, srcU, srcV,
