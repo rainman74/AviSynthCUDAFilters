@@ -20,22 +20,21 @@ struct FrameOldAnalyzeParam {
 class KFMCudaEventPlanes {
 protected:
     cudaEvent_t start;
-    cudaEvent_t endY;
     cudaEvent_t endU;
     cudaEvent_t endV;
     cudaStream_t streamMain;
-    cudaStream_t streamY;
     cudaStream_t streamU;
     cudaStream_t streamV;
 public:
     KFMCudaEventPlanes();
     ~KFMCudaEventPlanes();
     void init();
-    void startPlane(cudaStream_t sMain, cudaStream_t sY, cudaStream_t sU, cudaStream_t sV);
+    void startPlane(cudaStream_t sMain, cudaStream_t sU, cudaStream_t sV);
     void finPlane();
-    bool planeYFin();
     bool planeUFin();
     bool planeVFin();
+    cudaEvent_t getEventU();
+    cudaEvent_t getEventV();
 };
 
 class KFMCudaPlaneEventsPool {
@@ -45,12 +44,11 @@ public:
     KFMCudaPlaneEventsPool();
     ~KFMCudaPlaneEventsPool();
 
-    KFMCudaEventPlanes *PlaneStreamStart(cudaStream_t sMain, cudaStream_t sY, cudaStream_t sU, cudaStream_t sV);
+    KFMCudaEventPlanes *PlaneStreamStart(cudaStream_t sMain, cudaStream_t sU, cudaStream_t sV);
 };
 
 class KFMCudaPlaneStreams {
     cudaStream_t stream;
-    cudaStream_t streamY;
     cudaStream_t streamU;
     cudaStream_t streamV;
     KFMCudaPlaneEventsPool eventPool;

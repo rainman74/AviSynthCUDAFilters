@@ -8,20 +8,17 @@ int GetDeviceTypes(const PClip& clip);
 class cudaEventPlanes {
 protected:
     cudaEvent_t start;
-    cudaEvent_t endY;
     cudaEvent_t endU;
     cudaEvent_t endV;
     cudaStream_t streamMain;
-    cudaStream_t streamY;
     cudaStream_t streamU;
     cudaStream_t streamV;
 public:
     cudaEventPlanes();
     ~cudaEventPlanes();
     void init();
-    void startPlane(cudaStream_t sMain, cudaStream_t sY, cudaStream_t sU, cudaStream_t sV);
+    void startPlane(cudaStream_t sMain, cudaStream_t sU, cudaStream_t sV);
     void finPlane();
-    bool planeYFin();
     bool planeUFin();
     bool planeVFin();
 };
@@ -33,12 +30,11 @@ public:
     CudaPlaneEventsPool();
     ~CudaPlaneEventsPool();
 
-    cudaEventPlanes *PlaneStreamStart(cudaStream_t sMain, cudaStream_t sY, cudaStream_t sU, cudaStream_t sV);
+    cudaEventPlanes *PlaneStreamStart(cudaStream_t sMain, cudaStream_t sU, cudaStream_t sV);
 };
 
 class cudaPlaneStreams {
     cudaStream_t stream;
-    cudaStream_t streamY;
     cudaStream_t streamU;
     cudaStream_t streamV;
     CudaPlaneEventsPool eventPool;

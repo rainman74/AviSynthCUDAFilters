@@ -10,28 +10,22 @@
 #include "KFMFilterBase.cuh"
 
 
-KFMCudaEventPlanes::KFMCudaEventPlanes() : start(nullptr), endY(nullptr), endU(nullptr), endV(nullptr), streamMain(nullptr), streamY(nullptr), streamU(nullptr), streamV(nullptr) {}
+KFMCudaEventPlanes::KFMCudaEventPlanes() : start(nullptr), endU(nullptr), endV(nullptr), streamMain(nullptr), streamU(nullptr), streamV(nullptr) {}
 KFMCudaEventPlanes::~KFMCudaEventPlanes() {
     if (start) cudaEventDestroy(start);
-    if (endY) cudaEventDestroy(endY);
     if (endU) cudaEventDestroy(endU);
     if (endV) cudaEventDestroy(endV);
 }
 void KFMCudaEventPlanes::init() {
     if (!start) cudaEventCreate(&start);
-    if (!endY) cudaEventCreate(&endY);
     if (!endU) cudaEventCreate(&endU);
     if (!endV) cudaEventCreate(&endV);
 }
-void KFMCudaEventPlanes::startPlane(cudaStream_t sMain, cudaStream_t sY, cudaStream_t sU, cudaStream_t sV) {
+void KFMCudaEventPlanes::startPlane(cudaStream_t sMain, cudaStream_t sU, cudaStream_t sV) {
     streamMain = sMain;
-    streamY = sY;
     streamU = sU;
     streamV = sV;
     cudaEventRecord(start, sMain);
-    if (sY) {
-        cudaStreamWaitEvent(sY, start);
-    }
     if (sU) {
         cudaStreamWaitEvent(sU, start);
     }
@@ -40,17 +34,12 @@ void KFMCudaEventPlanes::startPlane(cudaStream_t sMain, cudaStream_t sY, cudaStr
     }
 }
 void KFMCudaEventPlanes::finPlane() {
-    if (streamY) cudaEventRecord(endY, streamY);
     if (streamU) cudaEventRecord(endU, streamU);
     if (streamV) cudaEventRecord(endV, streamV);
-    if (streamY || streamU || streamV) {
-        if (streamY) cudaStreamWaitEvent(streamMain, endY);
+    if (streamU || streamV) {
         if (streamU) cudaStreamWaitEvent(streamMain, endU);
         if (streamV) cudaStreamWaitEvent(streamMain, endV);
     }
-}
-bool KFMCudaEventPlanes::planeYFin() {
-    return cudaEventQuery(endY) == cudaSuccess;
 }
 bool KFMCudaEventPlanes::planeUFin() {
     return cudaEventQuery(endU) == cudaSuccess;
@@ -58,16 +47,22 @@ bool KFMCudaEventPlanes::planeUFin() {
 bool KFMCudaEventPlanes::planeVFin() {
     return cudaEventQuery(endV) == cudaSuccess;
 }
+cudaEvent_t KFMCudaEventPlanes::getEventU() {
+    return endU;
+}
+cudaEvent_t KFMCudaEventPlanes::getEventV() {
+    return endV;
+}
 
 KFMCudaPlaneEventsPool::KFMCudaPlaneEventsPool() : events() {}
 KFMCudaPlaneEventsPool::~KFMCudaPlaneEventsPool() { }
 
-KFMCudaEventPlanes *KFMCudaPlaneEventsPool::PlaneStreamStart(cudaStream_t sMain, cudaStream_t sY, cudaStream_t sU, cudaStream_t sV) {
+KFMCudaEventPlanes *KFMCudaPlaneEventsPool::PlaneStreamStart(cudaStream_t sMain, cudaStream_t sU, cudaStream_t sV) {
     KFMCudaEventPlanes *ptr = nullptr;
     // events ‚Ì’†g‚ðæ“ª‚©‚çŒ©‚ÄAcudaEventQuery‚ÅcudaSuccess‚ð•Ô‚é‚à‚Ì‚ª‚ ‚ê‚ÎA‚»‚ê‚ð––”ö‚ÉˆÚ“®‚·‚é
     auto it = events.begin();
     if (it != events.end()) {
-        if ((*it)->planeYFin() && (*it)->planeUFin() && (*it)->planeVFin()) {
+        if ((*it)->planeUFin() && (*it)->planeVFin()) {
             auto e = std::move(*it);
             events.erase(it);
             events.push_back(std::move(e));
@@ -79,16 +74,12 @@ KFMCudaEventPlanes *KFMCudaPlaneEventsPool::PlaneStreamStart(cudaStream_t sMain,
         ptr = events.back().get();
         ptr->init();
     }
-    ptr->startPlane(sMain, sY, sU, sV);
+    ptr->startPlane(sMain, sU, sV);
     return ptr;
 }
 
-KFMCudaPlaneStreams::KFMCudaPlaneStreams() : stream(nullptr), streamY(nullptr), streamU(nullptr), streamV(nullptr), eventPool() {}
+KFMCudaPlaneStreams::KFMCudaPlaneStreams() : stream(nullptr), streamU(nullptr), streamV(nullptr), eventPool() {}
 KFMCudaPlaneStreams::~KFMCudaPlaneStreams() {
-    if (streamY) {
-        cudaStreamDestroy(streamY);
-        streamY = nullptr;
-    }
     if (streamU) {
         cudaStreamDestroy(streamU);
         streamU = nullptr;
@@ -102,15 +93,14 @@ void KFMCudaPlaneStreams::initStream(cudaStream_t stream_) {
     stream = stream_;
 }
 KFMCudaEventPlanes *KFMCudaPlaneStreams::CreateEventPlanes() {
-    if (!streamY) {
-        cudaStreamCreateWithFlags(&streamY, cudaStreamNonBlocking);
+    if (!streamU) {
         cudaStreamCreateWithFlags(&streamU, cudaStreamNonBlocking);
         cudaStreamCreateWithFlags(&streamV, cudaStreamNonBlocking);
     }
-    return eventPool.PlaneStreamStart(stream, streamY, streamU, streamV);
+    return eventPool.PlaneStreamStart(stream, streamU, streamV);
 }
 void *KFMCudaPlaneStreams::GetDeviceStreamY() {
-    return streamY;
+    return stream;
 }
 void *KFMCudaPlaneStreams::GetDeviceStreamU() {
     return streamU;
@@ -126,7 +116,7 @@ void *KFMCudaPlaneStreams::GetDeviceStreamPlane(int idx) {
         case 1: return streamU;
         case 2: return streamV;
         case 0:
-        default: return streamY;
+        default: return stream;
     }
     return stream;
 }

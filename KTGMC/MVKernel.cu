@@ -3297,28 +3297,22 @@ public:
 /////////////////////////////////////////////////////////////////////////////
 // IKDeintCUDAImpl
 /////////////////////////////////////////////////////////////////////////////
-cudaEventPlanes::cudaEventPlanes() : start(nullptr), endY(nullptr), endU(nullptr), endV(nullptr), streamMain(nullptr), streamY(nullptr), streamU(nullptr), streamV(nullptr) {}
+cudaEventPlanes::cudaEventPlanes() : start(nullptr), endU(nullptr), endV(nullptr), streamMain(nullptr), streamU(nullptr), streamV(nullptr) {}
 cudaEventPlanes::~cudaEventPlanes() {
     if (start) cudaEventDestroy(start);
-    if (endY) cudaEventDestroy(endY);
     if (endU) cudaEventDestroy(endU);
     if (endV) cudaEventDestroy(endV);
 }
 void cudaEventPlanes::init() {
     if (!start) cudaEventCreate(&start);
-    if (!endY) cudaEventCreate(&endY);
     if (!endU) cudaEventCreate(&endU);
     if (!endV) cudaEventCreate(&endV);
 }
-void cudaEventPlanes::startPlane(cudaStream_t sMain, cudaStream_t sY, cudaStream_t sU, cudaStream_t sV) {
+void cudaEventPlanes::startPlane(cudaStream_t sMain, cudaStream_t sU, cudaStream_t sV) {
     streamMain = sMain;
-    streamY = sY;
     streamU = sU;
     streamV = sV;
     cudaEventRecord(start, sMain);
-    if (sY) {
-        cudaStreamWaitEvent(sY, start);
-    }
     if (sU) {
         cudaStreamWaitEvent(sU, start);
     }
@@ -3327,17 +3321,12 @@ void cudaEventPlanes::startPlane(cudaStream_t sMain, cudaStream_t sY, cudaStream
     }
 }
 void cudaEventPlanes::finPlane() {
-    if (streamY) cudaEventRecord(endY, streamY);
     if (streamU) cudaEventRecord(endU, streamU);
     if (streamV) cudaEventRecord(endV, streamV);
-    if (streamY || streamU || streamV) {
-        if (streamY) cudaStreamWaitEvent(streamMain, endY);
+    if (streamU || streamV) {
         if (streamU) cudaStreamWaitEvent(streamMain, endU);
         if (streamV) cudaStreamWaitEvent(streamMain, endV);
     }
-}
-bool cudaEventPlanes::planeYFin() {
-    return cudaEventQuery(endY) == cudaSuccess;
 }
 bool cudaEventPlanes::planeUFin() {
     return cudaEventQuery(endU) == cudaSuccess;
@@ -3349,12 +3338,12 @@ bool cudaEventPlanes::planeVFin() {
 CudaPlaneEventsPool::CudaPlaneEventsPool() : events() {}
 CudaPlaneEventsPool::~CudaPlaneEventsPool() { }
 
-cudaEventPlanes *CudaPlaneEventsPool::PlaneStreamStart(cudaStream_t sMain, cudaStream_t sY, cudaStream_t sU, cudaStream_t sV) {
+cudaEventPlanes *CudaPlaneEventsPool::PlaneStreamStart(cudaStream_t sMain, cudaStream_t sU, cudaStream_t sV) {
     cudaEventPlanes *ptr = nullptr;
     // events ‚Ì’†g‚ðæ“ª‚©‚çŒ©‚ÄAcudaEventQuery‚ÅcudaSuccess‚ð•Ô‚é‚à‚Ì‚ª‚ ‚ê‚ÎA‚»‚ê‚ð––”ö‚ÉˆÚ“®‚·‚é
     auto it = events.begin();
     if (it != events.end()) {
-        if ((*it)->planeYFin() && (*it)->planeUFin() && (*it)->planeVFin()) {
+        if ((*it)->planeUFin() && (*it)->planeVFin()) {
             auto e = std::move(*it);
             events.erase(it);
             events.push_back(std::move(e));
@@ -3366,16 +3355,12 @@ cudaEventPlanes *CudaPlaneEventsPool::PlaneStreamStart(cudaStream_t sMain, cudaS
         ptr = events.back().get();
         ptr->init();
     }
-    ptr->startPlane(sMain, sY, sU, sV);
+    ptr->startPlane(sMain, sU, sV);
     return ptr;
 }
 
-cudaPlaneStreams::cudaPlaneStreams() : stream(nullptr), streamY(nullptr), streamU(nullptr), streamV(nullptr), eventPool() {}
+cudaPlaneStreams::cudaPlaneStreams() : stream(nullptr), streamU(nullptr), streamV(nullptr), eventPool() {}
 cudaPlaneStreams::~cudaPlaneStreams() {
-    if (streamY) {
-        cudaStreamDestroy(streamY);
-        streamY = nullptr;
-    }
     if (streamU) {
         cudaStreamDestroy(streamU);
         streamU = nullptr;
@@ -3389,15 +3374,14 @@ void cudaPlaneStreams::initStream(cudaStream_t stream_) {
     stream = stream_;
 }
 cudaEventPlanes *cudaPlaneStreams::CreateEventPlanes() {
-    if (!streamY) {
-        cudaStreamCreateWithFlags(&streamY, cudaStreamNonBlocking);
+    if (!streamU) {
         cudaStreamCreateWithFlags(&streamU, cudaStreamNonBlocking);
         cudaStreamCreateWithFlags(&streamV, cudaStreamNonBlocking);
     }
-    return eventPool.PlaneStreamStart(stream, streamY, streamU, streamV);
+    return eventPool.PlaneStreamStart(stream, streamU, streamV);
 }
 void *cudaPlaneStreams::GetDeviceStreamY() {
-    return streamY;
+    return stream;
 }
 void *cudaPlaneStreams::GetDeviceStreamU() {
     return streamU;
@@ -3413,7 +3397,7 @@ void *cudaPlaneStreams::GetDeviceStreamPlane(int idx) {
         case 1: return streamU;
         case 2: return streamV;
         case 0:
-        default: return streamY;
+        default: return stream;
     }
     return stream;
 }
