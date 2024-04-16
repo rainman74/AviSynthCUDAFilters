@@ -1570,7 +1570,11 @@ public:
   PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env_)
   {
     PNeoEnv env = env_;
-
+    // TemporalSoftenとMakeSwitchFlagの内部でplaneごとにstreamを使って並列どうさせる最適化が考えられるが、
+    // まれにフリーズする現象の原因としての可能性を否定できなかったため、取りやめ
+    // MakeSwitchFlagでは途中の処理でflagtmppを一時変数としてplane間で使いまわしているため、
+    // そのままでは並列化ができない
+    // それに対策したつもりでもフリーズが発生したため、streamを使うのを取りやめることにした
     Frame src = TemporalSoften(
       child->GetFrame(n - 1, env),
       child->GetFrame(n + 0, env),

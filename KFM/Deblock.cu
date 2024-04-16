@@ -1670,6 +1670,13 @@ class KDeblock : public KFMFilterBase
 
         Frame dst = env->NewVideoFrame(vi);
 
+        // このplaneごとの処理をstreamで並列に扱う最適化が考えられるが、
+        // 原因不明の不具合があり、たま(30分のエンコードで10回に1回以下)で
+        // 0xc0000005例外で異常終了するため、stream使用を取りやめ
+        // DeblockPlane内部で使用する一時領域(tmpvi, padvi)等が
+        // paddingの影響でYとUVでサイズが異なるのが原因かもしれないが、
+        // それを考慮して実装したつもりでも発生するため、原因不明
+
         DeblockPlane(vi.width, vi.height,
             dst.GetWritePtr<pixel_t>(PLANAR_Y), dst.GetPitch<pixel_t>(PLANAR_Y),
             src.GetReadPtr<pixel_t>(PLANAR_Y), src.GetPitch<pixel_t>(PLANAR_Y),

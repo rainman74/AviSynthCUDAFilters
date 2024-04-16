@@ -847,7 +847,14 @@ union SearchBatchData {
 #define ANALYZE_SYNC 1
 
 template <typename pixel_t, int BLK_SIZE, int SEARCH, int NPEL, bool CHROMA, bool CPU_EMU>
-__global__ void kl_search(
+__global__ void
+#if 0 && __CUDA_ARCH__ < 700 // 下記はいろいろ変更した結果、現時点では不要になったため、無効化する
+    // レジスタを使いすぎると、Pascal等の昔のGPUでは速度が落ちるため、
+    // __launch_bounds__(maxThreadsPerBlock, minBlocksPerMultiprocessor) でレジスタ数を間接的に制限している
+    // 最低でもSMあたり4ブロックは流せるように調整
+    __launch_bounds__(BLK_SIZE * 8, 4)
+#endif
+kl_search(
   SearchBatchData<pixel_t> *pdata,
   int nBlkX, int nBlkY, int nPad,
   int nPitchY, int nPitchUV,
