@@ -372,12 +372,12 @@ __device__ unsigned int load4pixAligned(const pixel_t *ptr, int x, int y, int pi
     return ret;
 }
 
-template <typename pixel_t, int BLK_SIZE, bool CHROMA>
+template <typename pixel_t, int BLK_SIZE, bool CHROMA, bool REDUCE_FULLMASK>
 __device__ sad_t dev_calc_sad(
   int wi,
   const pixel_t* pSrcY, const pixel_t* pSrcU, const pixel_t* pSrcV,
   const pixel_t* pRefY, const pixel_t* pRefU, const pixel_t* pRefV,
-  int nPitchY, int nPitchU, int nPitchV)
+  int nPitchY, int nPitchU, int nPitchV, const unsigned int activemask)
 {
   enum {
     BLK_SIZE_UV = BLK_SIZE / 2,
@@ -435,7 +435,7 @@ __device__ sad_t dev_calc_sad(
       }
     }
   }
-  dev_reduce_warp<int, BLK_SIZE, AddReducer<int>>(wi, sad);
+  dev_reduce_warp_mask<int, BLK_SIZE, AddReducer<int>, REDUCE_FULLMASK>(wi, sad, activemask);
   return sad;
 }
 
@@ -565,8 +565,10 @@ __device__ void dev_expanding_search_1(
 
   __syncthreads();
 
-  if (isVectorOK[bx]) {
-    sad_t sad = dev_calc_sad<pixel_t, BLK_SIZE, CHROMA>(wi, pSrcY, pSrcU, pSrcV, pRefY[bx], pRefU[bx], pRefV[bx], nPitchY, nPitchU, nPitchV);
+  const bool vectorOKBx = isVectorOK[bx];
+  const unsigned int activemask = (BLK_SIZE >= WARP_SIZE) ? FULL_MASK : __ballot_sync(FULL_MASK, vectorOKBx); // BLK_SIZE >= WARP_SIZE のとき以外はwarp内でif文の結果が変わりうる
+  if (vectorOKBx) {
+    sad_t sad = dev_calc_sad<pixel_t, BLK_SIZE, CHROMA, (BLK_SIZE >= WARP_SIZE)>(wi, pSrcY, pSrcU, pSrcV, pRefY[bx], pRefU[bx], pRefV[bx], nPitchY, nPitchU, nPitchV, activemask);
     if (wi == 0) {
       result[bx].cost += sad + ((sad * PENALTY_NEW) >> 8);
 #if 0
@@ -669,19 +671,26 @@ __device__ void dev_expanding_search_2(
   }
 
   __syncthreads();
-
-  if (isVectorOK[bx]) {
-    sad_t sad = dev_calc_sad<pixel_t, BLK_SIZE, CHROMA>(wi, pSrcY, pSrcU, pSrcV, pRefY[bx], pRefU[bx], pRefV[bx], nPitchY, nPitchU, nPitchV);
-    if (wi == 0) {
-      result[bx].cost += sad + ((sad * PENALTY_NEW) >> 8);
-    }
+  {
+      const bool vectorOKBx = isVectorOK[bx];
+      const unsigned int activemask = (BLK_SIZE >= WARP_SIZE) ? FULL_MASK : __ballot_sync(FULL_MASK, vectorOKBx); // BLK_SIZE >= WARP_SIZE のとき以外はwarp内でif文の結果が変わりうる
+      if (vectorOKBx) {
+          sad_t sad = dev_calc_sad<pixel_t, BLK_SIZE, CHROMA, (BLK_SIZE >= WARP_SIZE)>(wi, pSrcY, pSrcU, pSrcV, pRefY[bx], pRefU[bx], pRefV[bx], nPitchY, nPitchU, nPitchV, activemask);
+          if (wi == 0) {
+              result[bx].cost += sad + ((sad * PENALTY_NEW) >> 8);
+          }
+      }
   }
-  int bx2 = bx + 8;
-  if (isVectorOK[bx2]) {
-    sad_t sad = dev_calc_sad<pixel_t, BLK_SIZE, CHROMA>(wi, pSrcY, pSrcU, pSrcV, pRefY[bx2], pRefU[bx2], pRefV[bx2], nPitchY, nPitchU, nPitchV);
-    if (wi == 0) {
-      result[bx2].cost += sad + ((sad * PENALTY_NEW) >> 8);
-    }
+  {
+      int bx2 = bx + 8;
+      const bool vectorOKBx2 = isVectorOK[bx2];
+      const unsigned int activemask2 = (BLK_SIZE >= WARP_SIZE) ? FULL_MASK : __ballot_sync(FULL_MASK, vectorOKBx2); // BLK_SIZE >= WARP_SIZE のとき以外はwarp内でif文の結果が変わりうる
+      if (vectorOKBx2) {
+          sad_t sad = dev_calc_sad<pixel_t, BLK_SIZE, CHROMA, (BLK_SIZE >= WARP_SIZE)>(wi, pSrcY, pSrcU, pSrcV, pRefY[bx2], pRefU[bx2], pRefV[bx2], nPitchY, nPitchU, nPitchV, activemask2);
+          if (wi == 0) {
+              result[bx2].cost += sad + ((sad * PENALTY_NEW) >> 8);
+          }
+      }
   }
 
   __syncthreads();
@@ -747,8 +756,10 @@ __device__ void dev_hex2_search_1(
 
   __syncthreads();
 
-  if (isVectorOK[bx]) {
-    sad_t sad = dev_calc_sad<pixel_t, BLK_SIZE, CHROMA>(wi, pSrcY, pSrcU, pSrcV, pRefY[bx], pRefU[bx], pRefV[bx], nPitchY, nPitchU, nPitchV);
+  const bool vectorOKBx = isVectorOK[bx];
+  const unsigned int activemask = (BLK_SIZE >= WARP_SIZE) ? FULL_MASK : __ballot_sync(FULL_MASK, vectorOKBx); // BLK_SIZE >= WARP_SIZE のとき以外はwarp内でif文の結果が変わりうる
+  if (vectorOKBx) {
+    sad_t sad = dev_calc_sad<pixel_t, BLK_SIZE, CHROMA, (BLK_SIZE >= WARP_SIZE)>(wi, pSrcY, pSrcU, pSrcV, pRefY[bx], pRefU[bx], pRefV[bx], nPitchY, nPitchU, nPitchV, activemask);
     if (wi == 0) {
       result[bx].cost += sad + ((sad * PENALTY_NEW) >> 8);
     }
@@ -1002,17 +1013,18 @@ kl_search(
 
       __syncthreads();
 
-      bool debug = (nBlkY == 10 && blkx == 1 && blky == 0);
-      //bool debug = false;
+      //bool debug = (nBlkY == 10 && blkx == 1 && blky == 0);
+      bool debug = false;
 
       // まずは7箇所を計算
+      const unsigned int activemask = (BLK_SIZE >= WARP_SIZE) ? FULL_MASK : __ballot_sync(FULL_MASK, bx < 7); // BLK_SIZE >= WARP_SIZE のとき以外はwarp内でif文の結果が変わりうる
       if (bx < 7) {
 #if 0
         if (wi == 0 && nBlkY == 10 && blkx == 1 && blky == 0) {
           printf("1:[%d]: x=%d,y=%d,cost=%d\n", bx, result[bx].xy.x, result[bx].xy.y, result[bx].cost);
         }
 #endif
-        sad_t sad = dev_calc_sad<pixel_t, BLK_SIZE, CHROMA>(wi, srcY, srcU, srcV, pRefY[bx], pRefU[bx], pRefV[bx], nPitchY, nPitchUV, nPitchUV);
+        sad_t sad = dev_calc_sad<pixel_t, BLK_SIZE, CHROMA, (BLK_SIZE >= WARP_SIZE)>(wi, srcY, srcU, srcV, pRefY[bx], pRefU[bx], pRefV[bx], nPitchY, nPitchUV, nPitchUV, activemask);
         //sad_t sad = dev_calc_sad_debug<pixel_t, BLK_SIZE, CHROMA>(debug && bx == 3, wi, srcY, srcU, srcV, pRefY[bx], pRefU[bx], pRefV[bx], nPitchY, nPitchUV, nPitchUV);
 
 #if 0

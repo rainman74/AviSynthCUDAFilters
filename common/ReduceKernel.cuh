@@ -5,6 +5,8 @@
 
 #define FULL_MASK (0xffffffffu)
 
+#define WARP_SIZE (32)
+
 enum {
     REDUCE_ADD,
     REDUCE_MAX,
@@ -35,86 +37,92 @@ struct MaxIndexReducer {
 };
 
 // MAX‚Í<=32‚©‚Â2‚×‚«‚Ì‚Ý‘Î‰ž
+template <typename T, int MAX, typename REDUCER, bool fullmask>
+__device__ void dev_reduce_warp_mask(int tid, T& value, const unsigned int argmaskvalue) {
+    const unsigned int mask = (fullmask) ? FULL_MASK : argmaskvalue;
+    REDUCER red;
+    // warp shuffle‚Åreduce
+#if CUDART_VERSION >= 9000
+    if (MAX >= 32) red(value, __shfl_down_sync(mask, value, 16));
+    if (MAX >= 16) red(value, __shfl_down_sync(mask, value, 8));
+    if (MAX >= 8) red(value, __shfl_down_sync(mask, value, 4));
+    if (MAX >= 4) red(value, __shfl_down_sync(mask, value, 2));
+    if (MAX >= 2) red(value, __shfl_down_sync(mask, value, 1));
+#else
+    if (MAX >= 32) red(value, __shfl_down(value, 16));
+    if (MAX >= 16) red(value, __shfl_down(value, 8));
+    if (MAX >= 8) red(value, __shfl_down(value, 4));
+    if (MAX >= 4) red(value, __shfl_down(value, 2));
+    if (MAX >= 2) red(value, __shfl_down(value, 1));
+#endif
+}
+
+// MAX‚Í<=32‚©‚Â2‚×‚«‚Ì‚Ý‘Î‰ž
+template <int MAX, typename REDUCER, bool fullmask>
+__device__ void dev_reduce_warp_mask<int>(int tid, int& value, const unsigned int argmaskvalue) {
+    const unsigned int mask = (fullmask) ? FULL_MASK : argmaskvalue;
+    REDUCER red;
+    // warp shuffle‚Åreduce
+#if __CUDA_ARCH__ >= 800
+    if (red.type == REDUCE_ADD) {
+        value = __reduce_add_sync(mask, value);
+    } else if (red.type == REDUCE_MAX) {
+        value = __reduce_max_sync(mask, value);
+    } else {
+#endif
+#if CUDART_VERSION >= 9000
+        if (MAX >= 32) red(value, __shfl_down_sync(mask, value, 16));
+        if (MAX >= 16) red(value, __shfl_down_sync(mask, value, 8));
+        if (MAX >= 8) red(value, __shfl_down_sync(mask, value, 4));
+        if (MAX >= 4) red(value, __shfl_down_sync(mask, value, 2));
+        if (MAX >= 2) red(value, __shfl_down_sync(mask, value, 1));
+#else
+        if (MAX >= 32) red(value, __shfl_down(value, 16));
+        if (MAX >= 16) red(value, __shfl_down(value, 8));
+        if (MAX >= 8) red(value, __shfl_down(value, 4));
+        if (MAX >= 4) red(value, __shfl_down(value, 2));
+        if (MAX >= 2) red(value, __shfl_down(value, 1));
+#endif
+#if __CUDA_ARCH__ >= 800
+    }
+#endif
+}
+
+// MAX‚Í<=32‚©‚Â2‚×‚«‚Ì‚Ý‘Î‰ž
+template <int MAX, typename REDUCER, bool fullmask>
+__device__ void dev_reduce_warp_mask<unsigned int>(int tid, unsigned int& value, const unsigned int argmaskvalue) {
+    const unsigned int mask = (fullmask) ? FULL_MASK : argmaskvalue;
+    REDUCER red;
+    // warp shuffle‚Åreduce
+#if __CUDA_ARCH__ >= 800
+    if (red.type == REDUCE_ADD) {
+        value = __reduce_add_sync(mask, value);
+    } else if (red.type == REDUCE_MAX) {
+        value = __reduce_max_sync(mask, value);
+    } else {
+#endif
+#if CUDART_VERSION >= 9000
+        if (MAX >= 32) red(value, __shfl_down_sync(mask, value, 16));
+        if (MAX >= 16) red(value, __shfl_down_sync(mask, value, 8));
+        if (MAX >= 8) red(value, __shfl_down_sync(mask, value, 4));
+        if (MAX >= 4) red(value, __shfl_down_sync(mask, value, 2));
+        if (MAX >= 2) red(value, __shfl_down_sync(mask, value, 1));
+#else
+        if (MAX >= 32) red(value, __shfl_down(value, 16));
+        if (MAX >= 16) red(value, __shfl_down(value, 8));
+        if (MAX >= 8) red(value, __shfl_down(value, 4));
+        if (MAX >= 4) red(value, __shfl_down(value, 2));
+        if (MAX >= 2) red(value, __shfl_down(value, 1));
+#endif
+#if __CUDA_ARCH__ >= 800
+    }
+#endif
+}
+
+// MAX‚Í<=32‚©‚Â2‚×‚«‚Ì‚Ý‘Î‰ž
 template <typename T, int MAX, typename REDUCER>
-__device__ void dev_reduce_warp(int tid, T& value)
-{
-    REDUCER red;
-    // warp shuffle‚Åreduce
-#if CUDART_VERSION >= 9000
-        if (MAX >= 32) red(value, __shfl_down_sync(FULL_MASK, value, 16));
-        if (MAX >= 16) red(value, __shfl_down_sync(FULL_MASK, value, 8));
-        if (MAX >= 8) red(value, __shfl_down_sync(FULL_MASK, value, 4));
-        if (MAX >= 4) red(value, __shfl_down_sync(FULL_MASK, value, 2));
-        if (MAX >= 2) red(value, __shfl_down_sync(FULL_MASK, value, 1));
-#else
-        if (MAX >= 32) red(value, __shfl_down(value, 16));
-        if (MAX >= 16) red(value, __shfl_down(value, 8));
-        if (MAX >= 8) red(value, __shfl_down(value, 4));
-        if (MAX >= 4) red(value, __shfl_down(value, 2));
-        if (MAX >= 2) red(value, __shfl_down(value, 1));
-#endif
-}
-
-// MAX‚Í<=32‚©‚Â2‚×‚«‚Ì‚Ý‘Î‰ž
-template <int MAX, typename REDUCER>
-__device__ void dev_reduce_warp<int>(int tid, int& value)
-{
-    REDUCER red;
-    // warp shuffle‚Åreduce
-#if __CUDA_ARCH__ >= 800
-    if (red.type == REDUCE_ADD) {
-        value = __reduce_add_sync(FULL_MASK, value);
-    } else if (red.type == REDUCE_MAX) {
-        value = __reduce_max_sync(FULL_MASK, value);
-    } else {
-#endif
-#if CUDART_VERSION >= 9000
-        if (MAX >= 32) red(value, __shfl_down_sync(FULL_MASK, value, 16));
-        if (MAX >= 16) red(value, __shfl_down_sync(FULL_MASK, value, 8));
-        if (MAX >= 8) red(value, __shfl_down_sync(FULL_MASK, value, 4));
-        if (MAX >= 4) red(value, __shfl_down_sync(FULL_MASK, value, 2));
-        if (MAX >= 2) red(value, __shfl_down_sync(FULL_MASK, value, 1));
-#else
-        if (MAX >= 32) red(value, __shfl_down(value, 16));
-        if (MAX >= 16) red(value, __shfl_down(value, 8));
-        if (MAX >= 8) red(value, __shfl_down(value, 4));
-        if (MAX >= 4) red(value, __shfl_down(value, 2));
-        if (MAX >= 2) red(value, __shfl_down(value, 1));
-#endif
-#if __CUDA_ARCH__ >= 800
-    }
-#endif
-}
-
-// MAX‚Í<=32‚©‚Â2‚×‚«‚Ì‚Ý‘Î‰ž
-template <int MAX, typename REDUCER>
-__device__ void dev_reduce_warp<unsigned int>(int tid, unsigned int& value)
-{
-    REDUCER red;
-    // warp shuffle‚Åreduce
-#if __CUDA_ARCH__ >= 800
-    if (red.type == REDUCE_ADD) {
-        value = __reduce_add_sync(FULL_MASK, value);
-    } else if (red.type == REDUCE_MAX) {
-        value = __reduce_max_sync(FULL_MASK, value);
-    } else {
-#endif
-#if CUDART_VERSION >= 9000
-        if (MAX >= 32) red(value, __shfl_down_sync(FULL_MASK, value, 16));
-        if (MAX >= 16) red(value, __shfl_down_sync(FULL_MASK, value, 8));
-        if (MAX >= 8) red(value, __shfl_down_sync(FULL_MASK, value, 4));
-        if (MAX >= 4) red(value, __shfl_down_sync(FULL_MASK, value, 2));
-        if (MAX >= 2) red(value, __shfl_down_sync(FULL_MASK, value, 1));
-#else
-        if (MAX >= 32) red(value, __shfl_down(value, 16));
-        if (MAX >= 16) red(value, __shfl_down(value, 8));
-        if (MAX >= 8) red(value, __shfl_down(value, 4));
-        if (MAX >= 4) red(value, __shfl_down(value, 2));
-        if (MAX >= 2) red(value, __shfl_down(value, 1));
-#endif
-#if __CUDA_ARCH__ >= 800
-    }
-#endif
+__device__ void dev_reduce_warp(int tid, T& value) {
+    dev_reduce_warp_mask<T, MAX, REDUCER, true>(tid, value, FULL_MASK);
 }
 
 // MAX‚Í2‚×‚«‚Ì‚Ý‘Î‰ž
