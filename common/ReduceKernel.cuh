@@ -192,6 +192,66 @@ __device__ void dev_reduceN_warp(int tid, T value[N])
 #endif
 }
 
+template <int N, int MAX, typename REDUCER>
+__device__ void dev_reduceN_warp<int>(int tid, int value[N])
+{
+    REDUCER red;
+    // warp shuffleÇ≈reduce
+#if __CUDA_ARCH__ >= 800
+    if (red.type == REDUCE_ADD) {
+        for (int i = 0; i < N; i++) value[i] = __reduce_add_sync(mask, value[i]);
+    } else if (red.type == REDUCE_MAX) {
+        for (int i = 0; i < N; i++) value[i] = __reduce_max_sync(mask, value[i]);
+    } else {
+#endif
+#if CUDART_VERSION >= 9000
+    if (MAX >= 32) for (int i = 0; i < N; i++) red(value[i], __shfl_down_sync(FULL_MASK, value[i], 16));
+    if (MAX >= 16) for (int i = 0; i < N; i++) red(value[i], __shfl_down_sync(FULL_MASK, value[i], 8));
+    if (MAX >= 8) for (int i = 0; i < N; i++) red(value[i], __shfl_down_sync(FULL_MASK, value[i], 4));
+    if (MAX >= 4) for (int i = 0; i < N; i++) red(value[i], __shfl_down_sync(FULL_MASK, value[i], 2));
+    if (MAX >= 2) for (int i = 0; i < N; i++) red(value[i], __shfl_down_sync(FULL_MASK, value[i], 1));
+#else
+    if (MAX >= 32) for (int i = 0; i < N; i++) red(value[i], __shfl_down(value[i], 16));
+    if (MAX >= 16) for (int i = 0; i < N; i++) red(value[i], __shfl_down(value[i], 8));
+    if (MAX >= 8) for (int i = 0; i < N; i++) red(value[i], __shfl_down(value[i], 4));
+    if (MAX >= 4) for (int i = 0; i < N; i++) red(value[i], __shfl_down(value[i], 2));
+    if (MAX >= 2) for (int i = 0; i < N; i++) red(value[i], __shfl_down(value[i], 1));
+#endif
+#if __CUDA_ARCH__ >= 800
+    }
+#endif
+}
+
+template <int N, int MAX, typename REDUCER>
+__device__ void dev_reduceN_warp<unsigned int>(int tid, unsigned int value[N])
+{
+    REDUCER red;
+    // warp shuffleÇ≈reduce
+#if __CUDA_ARCH__ >= 800
+    if (red.type == REDUCE_ADD) {
+        for (int i = 0; i < N; i++) value[i] = __reduce_add_sync(mask, value[i]);
+    } else if (red.type == REDUCE_MAX) {
+        for (int i = 0; i < N; i++) value[i] = __reduce_max_sync(mask, value[i]);
+    } else {
+#endif
+#if CUDART_VERSION >= 9000
+    if (MAX >= 32) for (int i = 0; i < N; i++) red(value[i], __shfl_down_sync(FULL_MASK, value[i], 16));
+    if (MAX >= 16) for (int i = 0; i < N; i++) red(value[i], __shfl_down_sync(FULL_MASK, value[i], 8));
+    if (MAX >= 8) for (int i = 0; i < N; i++) red(value[i], __shfl_down_sync(FULL_MASK, value[i], 4));
+    if (MAX >= 4) for (int i = 0; i < N; i++) red(value[i], __shfl_down_sync(FULL_MASK, value[i], 2));
+    if (MAX >= 2) for (int i = 0; i < N; i++) red(value[i], __shfl_down_sync(FULL_MASK, value[i], 1));
+#else
+    if (MAX >= 32) for (int i = 0; i < N; i++) red(value[i], __shfl_down(value[i], 16));
+    if (MAX >= 16) for (int i = 0; i < N; i++) red(value[i], __shfl_down(value[i], 8));
+    if (MAX >= 8) for (int i = 0; i < N; i++) red(value[i], __shfl_down(value[i], 4));
+    if (MAX >= 4) for (int i = 0; i < N; i++) red(value[i], __shfl_down(value[i], 2));
+    if (MAX >= 2) for (int i = 0; i < N; i++) red(value[i], __shfl_down(value[i], 1));
+#endif
+#if __CUDA_ARCH__ >= 800
+    }
+#endif
+}
+
 // MAXÇÕ2Ç◊Ç´ÇÃÇ›ëŒâû
 // bufÇÕshared memoryêÑèß
 template <typename T, int N, int MAX, typename REDUCER>
