@@ -1,0 +1,101 @@
+name: Build Windows Releases
+
+on:
+  push:
+    branches:
+      - master
+      - actions
+    tags:
+      - '*'
+
+jobs:
+  get_version_name:
+    name: Get version name
+    runs-on: ubuntu-latest
+    outputs:
+      rev_count: ${{ steps.rev.outputs.REVCOUNT }}
+      version_name: ${{ steps.rev.outputs.VERSION_NAME }}
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    - name: Set version name
+      id: rev
+      run: |
+        cd ${{ github.workspace }}
+        REVCOUNT=`git rev-list --count HEAD`
+        echo "rev_count=${REVCOUNT}" >> $GITHUB_OUTPUT
+        if [[ "${{ github.ref }}" =~ "refs/tags/" ]]; then
+          VERSION=$(echo ${{ github.ref }} | sed -e "s#refs/tags/##g")
+        else
+          VERSION=r${REVCOUNT}
+        fi
+        echo "version_name=${VERSION}" >> $GITHUB_OUTPUT
+
+  build:
+    name: Upload Release Asset
+    runs-on: windows-2022
+    needs: get_version_name
+
+    defaults:
+      run:
+        shell: cmd
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            platform: x64
+            configuration: Release
+            cuda_download_url: https://developer.download.nvidia.com/compute/cuda/11.8.0/network_installers/cuda_11.8.0_windows_network.exe
+            cuda_ver_major: 11
+            cuda_ver_minor: 8
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+          fetch-depth: 0
+
+      - name: Add msbuild to PATH
+        uses: microsoft/setup-msbuild@v2
+        with:
+          msbuild-architecture: ${{ matrix.arch }}
+          
+      - name: Setup CUDA
+        run: |
+          curl -s -o cuda_installer.exe -L ${{ matrix.cuda_download_url }}
+          cuda_installer.exe -s nvcc_${{ matrix.cuda_ver_major }}.${{ matrix.cuda_ver_minor }} cudart_${{ matrix.cuda_ver_major }}.${{ matrix.cuda_ver_minor }} visual_studio_integration_${{ matrix.cuda_ver_major }}.${{ matrix.cuda_ver_minor }}
+
+      - name: MSBuild
+        run: |
+          set CUDA_PATH=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v${{ matrix.cuda_ver_major }}.${{ matrix.cuda_ver_minor }}
+          set CUDA_PATH_V${{ matrix.cuda_ver_major }}_${{ matrix.cuda_ver_minor }}=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v${{ matrix.cuda_ver_major }}.${{ matrix.cuda_ver_minor }}
+          msbuild AviSynthCUDAFilters.sln /t:build /p:configuration=${{ matrix.configuration }} /p:Platform=${{ matrix.arch }} -maxcpucount
+
+      - name: Create Archieve
+        id: archieve
+        run: |
+          mkdir AviSynthCUDAFilters_release
+          copy ${{ matrix.platform }}\${{ matrix.configuration }}\*.dll AviSynthCUDAFilters_release
+          7z a -mx9 AviSynthCUDAFilters_${{ matrix.configuration }}_${{ needs.get_version_name.outputs.version_name }}.7z .\AviSynthCUDAFilters_release\*
+
+      - name: Check Version
+        id: check_ver
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          powershell "$ver = (Get-ItemProperty .\AviSynthCUDAFilters_release\KFM.dll).VersionInfo.FileVersion; if ($ver -eq '${{ needs.get_version_name.outputs.version_name }}') { exit 0; } exit 1;"
+
+      - name: Calc hash
+        id: calc_hash
+        run: |
+          7z h -scrc* AviSynthCUDAFilters_${{ matrix.configuration }}_${{ needs.get_version_name.outputs.version_name }}.7z
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: AviSynthCUDAFilters_${{ matrix.configuration }}_${{ needs.get_version_name.outputs.version_name }}
+          path: AviSynthCUDAFilters_${{ matrix.configuration }}_${{ needs.get_version_name.outputs.version_name }}.7z
