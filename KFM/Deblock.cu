@@ -1620,7 +1620,7 @@ class KDeblock : public KFMFilterBase
             if (IS_CUDA) {
                 dim3 threads(32, 8);
                 dim3 blocks(nblocks(width >> 2, threads.x), nblocks(height, threads.y));
-                kl_merge_deblock <<<blocks, threads>>> (width >> 2, height,
+                kl_merge_deblock <<<blocks, threads, 0, stream>>> (width >> 2, height,
                     tmpOut.GetReadPtr<ushort4>() + 2 + 8 * tmpOut.GetPitch<ushort4>(),
                     tmpOut.GetPitch<ushort4>(), qpvi.height * 8,
                     (vpixel_t*)dst, dstPitch >> 2, mergeShift, (float)mergeMaxV);
