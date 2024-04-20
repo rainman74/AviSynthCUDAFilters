@@ -75,7 +75,7 @@ jobs:
       - name: Install dependencies by vcpkg
         run: |
           vcpkg integrate install
-          vcpkg install boost:x64-windows-static
+          vcpkg install boost-spirit:x64-windows-static
           
       - name: Setup CUDA
         run: |
