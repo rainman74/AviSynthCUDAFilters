@@ -102,6 +102,10 @@
       <AdditionalOptions>-Xcompiler "/wd 4819" -std=c++17 -Xcudafe "--display_error_number --diag_suppress=177 --diag_suppress=68 --diag_suppress=550" -Wno-deprecated-gpu-targets %(AdditionalOptions)</AdditionalOptions>
       <CodeGeneration>$(CUDA_CODE_GEN)</CodeGeneration>
     </CudaCompile>
+    <ResourceCompile>
+      <AdditionalIncludeDirectories>$(SolutionDir)common</AdditionalIncludeDirectories>
+      <AdditionalOptions>/c 65001 %(AdditionalOptions)</AdditionalOptions>
+    </ResourceCompile>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <ClCompile>
@@ -123,6 +127,10 @@
       <CodeGeneration>$(CUDA_CODE_GEN)</CodeGeneration>
       <TargetMachinePlatform>64</TargetMachinePlatform>
     </CudaCompile>
+    <ResourceCompile>
+      <AdditionalIncludeDirectories>$(SolutionDir)common</AdditionalIncludeDirectories>
+      <AdditionalOptions>/c 65001 %(AdditionalOptions)</AdditionalOptions>
+    </ResourceCompile>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <ClCompile>
@@ -151,6 +159,10 @@
       <GenerateLineInfo>true</GenerateLineInfo>
       <CodeGeneration>$(CUDA_CODE_GEN)</CodeGeneration>
     </CudaCompile>
+    <ResourceCompile>
+      <AdditionalIncludeDirectories>$(SolutionDir)common</AdditionalIncludeDirectories>
+      <AdditionalOptions>/c 65001 %(AdditionalOptions)</AdditionalOptions>
+    </ResourceCompile>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile>
@@ -180,6 +192,10 @@
       <CodeGeneration>$(CUDA_CODE_GEN)</CodeGeneration>
       <TargetMachinePlatform>64</TargetMachinePlatform>
     </CudaCompile>
+    <ResourceCompile>
+      <AdditionalIncludeDirectories>$(SolutionDir)common</AdditionalIncludeDirectories>
+      <AdditionalOptions>/c 65001 %(AdditionalOptions)</AdditionalOptions>
+    </ResourceCompile>
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="DeblockAVX.cpp">
@@ -199,6 +215,7 @@
     <ClInclude Include="..\common\Copy.h" />
     <ClInclude Include="KFM.h" />
     <ClInclude Include="KFMFilterBase.cuh" />
+    <ClInclude Include="KFMversion.h" />
     <ClInclude Include="SIMDSupport.hpp" />
     <ClInclude Include="TextOut.h" />
   </ItemGroup>
@@ -214,6 +231,9 @@
     </CudaCompile>
     <CudaCompile Include="KFMKernel.cu" />
     <CudaCompile Include="MergeStatic.cu" />
+  </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="KFM.rc" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
 </Project>

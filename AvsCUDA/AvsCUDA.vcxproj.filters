@@ -51,6 +51,9 @@
     <ClInclude Include="filters\resample_functions.h">
       <Filter>ヘッダー ファイル\filters</Filter>
     </ClInclude>
+    <ClInclude Include="AvsCUDAversion.h">
+      <Filter>ヘッダー ファイル</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="AvsCUDA.cpp">
@@ -104,5 +107,10 @@
     <CudaCompile Include="filters\resample.cu">
       <Filter>ソース ファイル\filters</Filter>
     </CudaCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="AvsCUDA.rc">
+      <Filter>リソース ファイル</Filter>
+    </ResourceCompile>
   </ItemGroup>
 </Project>

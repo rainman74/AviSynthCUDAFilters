@@ -38,6 +38,9 @@
     <ClInclude Include="SIMDSupport.hpp">
       <Filter>ヘッダー ファイル</Filter>
     </ClInclude>
+    <ClInclude Include="KFMversion.h">
+      <Filter>ヘッダー ファイル</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <CudaCompile Include="KFMKernel.cu">
@@ -65,5 +68,10 @@
     <CudaCompile Include="Deblock.cu">
       <Filter>ソース ファイル</Filter>
     </CudaCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="KFM.rc">
+      <Filter>リソース ファイル</Filter>
+    </ResourceCompile>
   </ItemGroup>
 </Project>
