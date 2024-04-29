@@ -1686,7 +1686,7 @@ __global__ void kl_load_mv_batch(
     __shared__ LoadMVBatchData<pixel_t> d;
 
     if (tx < LoadMVBatchData<pixel_t>::LEN) {
-        d.data[tx] = pdata[blockIdx.y].data[x];
+        d.data[tx] = pdata[blockIdx.y].data[tx];
     }
     __syncthreads();
 
