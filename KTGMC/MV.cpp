@@ -2199,10 +2199,10 @@ public:
   int GetWorkSize()
   {
     return GetVectorsPitch() * p.batch * sizeof(short2) +
-      (GetSadsPitch() + 1 + p.nBlkX) * p.batch * sizeof(int) +
-      p.nBlkCount * p.batch * kernel->GetSearchBlockSize() +
-      p.batch * kernel->GetSearchBatchSize() +
-      p.batch * kernel->GetLoadMVBatchSize();
+      (GetSadsPitch() /*sads*/ + 1 /*next*/ + p.nBlkX /*prog*/) * p.batch * sizeof(int) +
+      p.nBlkCount * p.batch * kernel->GetSearchBlockSize() + /*blocks*/
+      p.batch * kernel->GetSearchBatchSize() + /*batchdata*/
+      p.batch * kernel->GetLoadMVBatchSize(); /*loadmvbatchdata*/
   }
 
   void SetWorkMemory(uint8_t* work)
@@ -2212,8 +2212,8 @@ public:
     prog = &sads[GetSadsPitch() * p.batch];
     next = &prog[p.nBlkX * p.batch];
     blocks = (void*)&next[1 * p.batch];
-    batchdata = (void*)&((uint8_t*)blocks)[p.nBlkCount * kernel->GetSearchBlockSize() * p.batch];
-    loadmvbatchdata = (void*)&((uint8_t*)blocks)[p.batch * kernel->GetSearchBatchSize() * p.batch];
+    batchdata = (void*)&((uint8_t*)blocks)[p.nBlkCount * p.batch * kernel->GetSearchBlockSize()];
+    loadmvbatchdata = (void*)&((uint8_t*)batchdata)[p.batch * kernel->GetSearchBatchSize()];
 
     // オフセットしておく
     vectors += N_CONST_VEC;
