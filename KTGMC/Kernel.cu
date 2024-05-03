@@ -1803,9 +1803,9 @@ protected:
 
     auto planeEvent = CreateEventPlanes();
 
-    const bool uvSamePitch = src0->GetPitch(PLANAR_U) == src0->GetPitch(PLANAR_V);
+    const bool uvSameProc = src0->GetPitch(PLANAR_U) == src0->GetPitch(PLANAR_V) && modes[1] == 3 && modes[1] == 3;
 
-    for (int p = 0; p < (uvSamePitch && modes[1] >= 2 && modes[2] >= 2 ? 2 : 3); p++) {
+    for (int p = 0; p < (uvSameProc ? 2 : 3); p++) {
       const int mode = modes[p];
       if (mode == 1) continue;
 
@@ -1814,12 +1814,12 @@ protected:
       const pixel_t* pSrc1A = (numChilds >= 2) ? reinterpret_cast<const pixel_t*>(src1->GetReadPtr(planes[p])) : nullptr;
       const pixel_t* pSrc2A = (numChilds >= 3) ? reinterpret_cast<const pixel_t*>(src2->GetReadPtr(planes[p])) : nullptr;
       const pixel_t* pSrc3A = (numChilds >= 4) ? reinterpret_cast<const pixel_t*>(src3->GetReadPtr(planes[p])) : nullptr;
-      const pixel_t* pSrc0B = (                  p > 0 && uvSamePitch) ? reinterpret_cast<const pixel_t*>(src0->GetReadPtr(planes[p + 1])) : nullptr;
-      const pixel_t* pSrc1B = (numChilds >= 2 && p > 0 && uvSamePitch) ? reinterpret_cast<const pixel_t*>(src1->GetReadPtr(planes[p + 1])) : nullptr;
-      const pixel_t* pSrc2B = (numChilds >= 3 && p > 0 && uvSamePitch) ? reinterpret_cast<const pixel_t*>(src2->GetReadPtr(planes[p + 1])) : nullptr;
-      const pixel_t* pSrc3B = (numChilds >= 4 && p > 0 && uvSamePitch) ? reinterpret_cast<const pixel_t*>(src3->GetReadPtr(planes[p + 1])) : nullptr;
+      const pixel_t* pSrc0B = (                  p > 0 && uvSameProc) ? reinterpret_cast<const pixel_t*>(src0->GetReadPtr(planes[p + 1])) : nullptr;
+      const pixel_t* pSrc1B = (numChilds >= 2 && p > 0 && uvSameProc) ? reinterpret_cast<const pixel_t*>(src1->GetReadPtr(planes[p + 1])) : nullptr;
+      const pixel_t* pSrc2B = (numChilds >= 3 && p > 0 && uvSameProc) ? reinterpret_cast<const pixel_t*>(src2->GetReadPtr(planes[p + 1])) : nullptr;
+      const pixel_t* pSrc3B = (numChilds >= 4 && p > 0 && uvSameProc) ? reinterpret_cast<const pixel_t*>(src3->GetReadPtr(planes[p + 1])) : nullptr;
       pixel_t* pDstA = reinterpret_cast<pixel_t*>(dst->GetWritePtr(planes[p]));
-      pixel_t* pDstB = (p > 0 && uvSamePitch) ? reinterpret_cast<pixel_t*>(dst->GetWritePtr(planes[p + 1])) : nullptr;
+      pixel_t* pDstB = (p > 0 && uvSameProc) ? reinterpret_cast<pixel_t*>(dst->GetWritePtr(planes[p + 1])) : nullptr;
 
       const int pitch = src0->GetPitch(planes[p]) / sizeof(pixel_t);
       int width = vi.width;
