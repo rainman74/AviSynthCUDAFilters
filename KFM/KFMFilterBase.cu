@@ -774,12 +774,8 @@ void KFMFilterBase::CopyFrameAndPad(Frame& src, Frame& dst, PNeoEnv env)
       kl_copy_pad<vpixel_t> <<<blocks, threads, 0, stream >>> ((vpixel_t *)dstV, dstPitchUV >> 2, (vpixel_t *)srcV, srcPitchUV >> 2, width4UV, heightUV, 0, vpadUV);
     }
   } else {
-    Copy(dstY, dstPitchY, srcY, srcPitchY, srcvi.width, srcvi.height, env);
-    Copy(dstU, dstPitchUV, srcU, srcPitchUV, widthUV, heightUV, env);
-    Copy(dstV, dstPitchUV, srcV, srcPitchUV, widthUV, heightUV, env);
-    cpu_padv<vpixel_t>((vpixel_t *)dstY, width4, srcvi.height, dstPitchY, VPAD);
-    cpu_padv<vpixel_t>((vpixel_t *)dstU, width4UV, heightUV, dstPitchUV, vpadUV);
-    cpu_padv<vpixel_t>((vpixel_t *)dstV, width4UV, heightUV, dstPitchUV, vpadUV);
+    CopyFrame<pixel_t>(src, dst, env);
+    PadFrame<pixel_t>(dst, env);
   }
 }
 
