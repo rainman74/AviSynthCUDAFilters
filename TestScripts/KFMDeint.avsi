@@ -7,7 +7,7 @@ SetFilterMTMode("SVAnalyse",1)
 SetFilterMTMode("SVSmoothFps",1)
 
 function KFMDeint(clip src, int "mode", int "pass", string "preset", float "thswitch", bool "ucf", bool "nr", bool "svp",\
-                            string "filepath", bool "cuda", int "dev", int "threads", bool "show") {
+                            string "filepath", bool "cuda", int "dev", int "threads", bool "is120", bool "show") {
 
     mode = default(mode, 0) # 0:VFR 1:60fps 2:24fps, 3:3clips(24p,30p,60p), 4:VFR(60fps)
     pass = default(pass, 0) # 0:realtime 1:pre process(mode:0or2or4) 2:only timing(mode:0or4) 3:generate images
@@ -20,6 +20,7 @@ function KFMDeint(clip src, int "mode", int "pass", string "preset", float "thsw
     cuda = default(cuda, false) # Enable CUDA
     dev = default(dev, 0) # CUDA device index
     threads = default(threads, 6) # Number of CPU threads
+    is120 = default(is120, false) # VFR frame timing
     show = default(show, false) # Show information
     
     ivtc = Select(mode, true, false, true, true, true) # Enable Inverse Telecine
@@ -33,7 +34,7 @@ function KFMDeint(clip src, int "mode", int "pass", string "preset", float "thsw
     Assert(!(mode == 1 && pass != 0), "60fps mode does not support multi-pass")
     Assert(!(mode == 2 && pass == 2), "24fps mode does not support timing output pass")
     Assert(!(mode == 3 && pass == 2), "3clips mode does not support timing output pass")
-    Assert((mode == 2 || mode == 4 || !svp), "only mode 2 and 4 support SVP")
+    Assert(mode == 2 || mode == 4 || !svp, "only mode 2 and 4 support SVP")
 
     # CUDAデバイスチェック
     if(cuda) {
@@ -246,7 +247,7 @@ function KFMDeint(clip src, int "mode", int "pass", string "preset", float "thsw
 				}
             
 				mode = (pass == 2) ? 2 : 0
-				clip60.KFMSwitch(fmclip, clip24, mask24, cc24, clip30, mask30, cc30, ucfc, thswitch=thswitch, mode=mode, filepath=filepath, show=show)
+				clip60.KFMSwitch(fmclip, clip24, mask24, cc24, clip30, mask30, cc30, ucfc, thswitch=thswitch, mode=mode, filepath=filepath, is120=is120, show=show)
 				
 				if(decimate && pass == 3) {
 					KFMDecimate(filepath=filepath)
