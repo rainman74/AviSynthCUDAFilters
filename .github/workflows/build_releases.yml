@@ -93,6 +93,7 @@ jobs:
         run: |
           mkdir AviSynthCUDAFilters_release
           copy ${{ matrix.platform }}\${{ matrix.configuration }}\*.dll AviSynthCUDAFilters_release
+          copy TestScripts\KFMDeint.avsi TestScripts\KSMDegrain.avsi TestScripts\KTGMC.avsi AviSynthCUDAFilters_release
           7z a -mx9 AviSynthCUDAFilters_${{ matrix.configuration }}_${{ needs.get_version_name.outputs.version_name }}.zip .\AviSynthCUDAFilters_release\*
 
       - name: Check Version
