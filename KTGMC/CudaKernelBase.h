@@ -25,7 +25,7 @@ public:
 #ifndef NDEBUG
     cudaPointerAttributes attr;
     CUDA_CHECK(cudaPointerGetAttributes(&attr, ptr));
-    if (attr.memoryType != cudaMemoryTypeDevice) {
+    if (attr.type != cudaMemoryTypeDevice) {
       env->ThrowError("[CUDA Error] Not valid devicce pointer");
     }
 #endif

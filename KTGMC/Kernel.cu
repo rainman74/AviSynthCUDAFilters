@@ -27,8 +27,10 @@
 
 class CUDAFilterBase : public GenericVideoFilter {
   std::unique_ptr<cudaPlaneStreams> planeStreams;
+protected:
+  PNeoEnv env;
 public:
-  CUDAFilterBase(PClip _child, IScriptEnvironment* env_) : GenericVideoFilter(_child), planeStreams(std::make_unique<cudaPlaneStreams>()) {
+  CUDAFilterBase(PClip _child, IScriptEnvironment* env_) : GenericVideoFilter(_child), env((PNeoEnv)env_), planeStreams(std::make_unique<cudaPlaneStreams>()) {
       planeStreams->initStream((cudaStream_t)((PNeoEnv)env_)->GetDeviceStream());
   }
   int __stdcall SetCacheHints(int cachehints, int frame_range) {
