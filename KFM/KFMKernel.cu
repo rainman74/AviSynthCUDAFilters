@@ -6,6 +6,7 @@
 #include <numeric>
 #include <memory>
 #include <vector>
+#include <mutex>
 
 #include "CommonFunctions.h"
 #include "KFM.h"
@@ -181,6 +182,7 @@ class KFMSwitch : public KFMFilterBase
 	// timecode¶¬—pƒeƒ“ƒ|ƒ‰ƒŠ
 	std::string filepath;
 	std::vector<FrameDurationInfo> durations;
+    std::mutex mtxGetFrameTop;
 	int current;
 	bool complete;
 
@@ -483,6 +485,7 @@ class KFMSwitch : public KFMFilterBase
   template <typename pixel_t>
   PVideoFrame GetFrameTop(int n60, PNeoEnv env)
   {
+    std::lock_guard<std::mutex> lock(mtxGetFrameTop);
     PDevice cpudev = env->GetDevice(DEV_TYPE_CPU, 0);
     int cycleIndex = n60 / 10;
     KFMResult fm = *(Frame(env->GetFrame(fmclip, cycleIndex, cpudev)).GetReadPtr<KFMResult>());
