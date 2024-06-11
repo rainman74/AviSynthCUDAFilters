@@ -459,7 +459,7 @@ class KFMSwitch : public KFMFilterBase
     file.reset();
 
     if (is120) {
-        for (int i = 0; i < (int)durations.size(); i++) {
+        for (int i = 0; i < (int)durations.size()-1; i++) {
             if (frame_list[i].isFrame24 && frame_list[i+1].isFrame24) {
                 if (frame_list[i + 0].duration + frame_list[i + 1].duration == 10) {
                     frame_list[i + 0].duration = 5;
