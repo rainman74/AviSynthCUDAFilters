@@ -59,7 +59,7 @@ KFMCudaPlaneEventsPool::~KFMCudaPlaneEventsPool() { }
 
 KFMCudaEventPlanes *KFMCudaPlaneEventsPool::PlaneStreamStart(cudaStream_t sMain, cudaStream_t sU, cudaStream_t sV) {
     KFMCudaEventPlanes *ptr = nullptr;
-    // events ‚Ì’†g‚ğæ“ª‚©‚çŒ©‚ÄAcudaEventQuery‚ÅcudaSuccess‚ğ•Ô‚é‚à‚Ì‚ª‚ ‚ê‚ÎA‚»‚ê‚ğ––”ö‚ÉˆÚ“®‚·‚é
+    // events ï¿½Ì’ï¿½ï¿½gï¿½ï¿½æ“ªï¿½ï¿½ï¿½çŒ©ï¿½ÄAcudaEventQueryï¿½ï¿½cudaSuccessï¿½ï¿½Ô‚ï¿½ï¿½ï¿½Ì‚ï¿½ï¿½ï¿½ï¿½ï¿½ÎAï¿½ï¿½ï¿½ï¿½ğ––”ï¿½ï¿½ÉˆÚ“ï¿½ï¿½ï¿½ï¿½ï¿½
     auto it = events.begin();
     if (it != events.end()) {
         if ((*it)->planeUFin() && (*it)->planeVFin()) {
@@ -130,7 +130,7 @@ int Get8BitType(const VideoInfo& vi) {
   if (vi.Is420()) return VideoInfo::CS_YV12;
   else if (vi.Is422()) return VideoInfo::CS_YV16;
   else if (vi.Is444()) return VideoInfo::CS_YV24;
-  // ‚±‚êˆÈŠO‚Í’m‚ç‚ñ
+  // ï¿½ï¿½ï¿½ï¿½ÈŠOï¿½Í’mï¿½ï¿½ï¿½
   return VideoInfo::CS_BGR24;
 }
 
@@ -138,7 +138,7 @@ int Get16BitType(const VideoInfo& vi) {
   if (vi.Is420()) return VideoInfo::CS_YUV420P16;
   else if (vi.Is422()) return VideoInfo::CS_YUV422P16;
   else if (vi.Is444()) return VideoInfo::CS_YUV444P16;
-  // ‚±‚êˆÈŠO‚Í’m‚ç‚ñ
+  // ï¿½ï¿½ï¿½ï¿½ÈŠOï¿½Í’mï¿½ï¿½ï¿½
   return VideoInfo::CS_BGR48;
 }
 
@@ -151,7 +151,7 @@ int GetYType(const VideoInfo& vi) {
 	case 16: return VideoInfo::CS_Y16;
 	case 32: return VideoInfo::CS_Y32;
 	}
-	// ‚±‚êˆÈŠO‚Í’m‚ç‚ñ
+	// ï¿½ï¿½ï¿½ï¿½ÈŠOï¿½Í’mï¿½ï¿½ï¿½
 	return VideoInfo::CS_Y8;
 }
 
@@ -164,7 +164,7 @@ int Get444Type(const VideoInfo& vi) {
 	case 16: return VideoInfo::CS_YUV444P16;
 	case 32: return VideoInfo::CS_YUV444PS;
 	}
-	// ‚±‚êˆÈŠO‚Í’m‚ç‚ñ
+	// ï¿½ï¿½ï¿½ï¿½ÈŠOï¿½Í’mï¿½ï¿½ï¿½
 	return VideoInfo::CS_YV24;
 }
 
@@ -175,7 +175,7 @@ Frame NewSwitchFlagFrame(VideoInfo vi, PNeoEnv env)
 
   Frame frame = env->NewVideoFrame(vi);
 
-  // ƒ[ƒ‰Šú‰»
+  // ï¿½[ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
   vpixel_t* flagp = frame.GetWritePtr<vpixel_t>();
   int pitch = frame.GetPitch<vpixel_t>();
   int width = frame.GetPitch<vpixel_t>();
@@ -239,6 +239,30 @@ __global__ void kl_copy(pixel_t* dst, const pixel_t* __restrict__ src, int width
     dst[x + y * pitch] = src[x + y * pitch];
   }
 }
+
+template __global__ void kl_copy<uint8_t>(uint8_t* dst, const uint8_t* __restrict__ src, int width, int height, int pitch);
+template __global__ void kl_copy<uint16_t>(uint16_t* dst, const uint16_t* __restrict__ src, int width, int height, int pitch);
+template __global__ void kl_copy<uchar4>(uchar4* dst, const uchar4* __restrict__ src, int width, int height, int pitch);
+template __global__ void kl_copy<ushort4>(ushort4* dst, const ushort4* __restrict__ src, int width, int height, int pitch);
+
+template <typename pixel_t>
+__global__ void kl_copy_2plane(pixel_t* dst0, pixel_t* dst1, const pixel_t* __restrict__ src0, const pixel_t* __restrict__ src1, int width, int height, int pitch)
+{
+    int x = threadIdx.x + blockIdx.x * blockDim.x;
+    int y = threadIdx.y + blockIdx.y * blockDim.y;
+
+    pixel_t* dst = (blockIdx.z == 0) ? dst0 : dst1;
+    const pixel_t* __restrict__ src = (blockIdx.z == 0) ? src0 : src1;
+
+    if (x < width && y < height) {
+        dst[x + y * pitch] = src[x + y * pitch];
+    }
+}
+
+template __global__ void kl_copy_2plane<uint8_t>(uint8_t* dst0, uint8_t* dst1, const uint8_t* __restrict__ src0, const uint8_t* __restrict__ src1, int width, int height, int pitch);
+template __global__ void kl_copy_2plane<uint16_t>(uint16_t* dst0, uint16_t* dst1, const uint16_t* __restrict__ src0, const uint16_t* __restrict__ src1, int width, int height, int pitch);
+template __global__ void kl_copy_2plane<uchar4>(uchar4* dst0, uchar4* dst1, const uchar4* __restrict__ src0, const uchar4* __restrict__ src1, int width, int height, int pitch);
+template __global__ void kl_copy_2plane<ushort4>(ushort4* dst0, ushort4* dst1, const ushort4* __restrict__ src0, const ushort4* __restrict__ src1, int width, int height, int pitch);
 
 template <typename pixel_t>
 void cpu_average(pixel_t* dst, const pixel_t* __restrict__ src0, const pixel_t* __restrict__ src1, int width, int height, int pitch)
@@ -305,41 +329,70 @@ template <typename T> __device__ void inline swap(T& a, T& b) {
 }
 
 template <typename vpixel_t>
+__device__ vpixel_t kl_copy_pad_get_pix(
+    const vpixel_t *__restrict__ src, const int srcpitch4,
+    const int width4, const int height,
+    const int x, const int y
+) {
+    bool padx = true;
+    int srcx = x;
+    if (srcx < 0) {
+        srcx = -srcx - 1;
+    } else if (srcx >= width4) {
+        srcx = width4 - (srcx - width4) - 1;
+    } else {
+        padx = false;
+    }
+    int srcy = y;
+    if (srcy < 0) {
+        srcy = -srcy - 1;
+    } else if (srcy >= height) {
+        srcy = height - (srcy - height) - 1;
+    }
+    vpixel_t v = src[srcx + srcy * srcpitch4];
+    if (padx) {
+        swap(v.x, v.w);
+        swap(v.y, v.z);
+    }
+    return v;
+}
+
+template <typename vpixel_t>
 __global__ void kl_copy_pad(
-    vpixel_t *dst, const int dstpitch4, // 2s•ª‚ğ‘z’è
-    const vpixel_t *src, const int srcpitch4, // 2s•ª‚ğ‘z’è
+    vpixel_t *dst, const int dstpitch4, // 2ï¿½sï¿½ï¿½ï¿½ï¿½zï¿½ï¿½
+    const vpixel_t *__restrict__ src, const int srcpitch4, // 2ï¿½sï¿½ï¿½ï¿½ï¿½zï¿½ï¿½
     const int width4, const int height,
     const int hpad4, const int vpad) {
-    const int x = threadIdx.x + blockIdx.x * blockDim.x - hpad4; // 1ƒXƒŒƒbƒh4pixel
+    const int x = threadIdx.x + blockIdx.x * blockDim.x - hpad4; // 1ï¿½Xï¿½ï¿½ï¿½bï¿½h4pixel
     const int y = threadIdx.y + blockIdx.y * blockDim.y - vpad;
 
     if (x < width4 + hpad4 && y < height + vpad) {
-        bool padx = true;
-        int srcx = x;
-        if (srcx < 0) {
-            srcx = -srcx - 1;
-        } else if (srcx >= width4) {
-            srcx = width4 - (srcx - width4) - 1;
-        } else {
-            padx = false;
-        }
-        int srcy = y;
-        if (srcy < 0) {
-            srcy = -srcy - 1;
-        } else if (srcy >= height) {
-            srcy = height - (srcy - height) - 1;
-        }
-        vpixel_t v = src[srcx + srcy * srcpitch4];
-        if (padx) {
-            swap(v.x, v.w);
-            swap(v.y, v.z);
-        }
-        dst[x + y * dstpitch4] = v;
+        dst[x + y * dstpitch4] = kl_copy_pad_get_pix<vpixel_t>(src, srcpitch4, width4, height, x, y);
     }
 }
 
-template __global__ void kl_copy_pad(uchar4 *dst, const int dstpitch4, const uchar4 *src, const int srcpitch4, const int width4, const int height, const int hpad4, const int vpad);
-template __global__ void kl_copy_pad(ushort4 *dst, const int dstpitch4, const ushort4 *src, const int srcpitch4, const int width4, const int height, const int hpad4, const int vpad);
+template __global__ void kl_copy_pad(uchar4 *dst, const int dstpitch4, const uchar4 *__restrict__ src, const int srcpitch4, const int width4, const int height, const int hpad4, const int vpad);
+template __global__ void kl_copy_pad(ushort4 *dst, const int dstpitch4, const ushort4 *__restrict__ src, const int srcpitch4, const int width4, const int height, const int hpad4, const int vpad);
+
+template <typename vpixel_t>
+__global__ void kl_copy_pad_2plane(
+    vpixel_t *dst0, vpixel_t *dst1, const int dstpitch4, // 2ï¿½sï¿½ï¿½ï¿½ï¿½zï¿½ï¿½
+    const vpixel_t *__restrict__ src0, const vpixel_t *__restrict__ src1, const int srcpitch4, // 2ï¿½sï¿½ï¿½ï¿½ï¿½zï¿½ï¿½
+    const int width4, const int height,
+    const int hpad4, const int vpad) {
+    const int x = threadIdx.x + blockIdx.x * blockDim.x - hpad4; // 1ï¿½Xï¿½ï¿½ï¿½bï¿½h4pixel
+    const int y = threadIdx.y + blockIdx.y * blockDim.y - vpad;
+
+    vpixel_t *dst = (blockIdx.z == 0) ? dst0 : dst1;
+    const vpixel_t *src = (blockIdx.z == 0) ? src0 : src1;
+
+    if (x < width4 + hpad4 && y < height + vpad) {
+        dst[x + y * dstpitch4] = kl_copy_pad_get_pix<vpixel_t>(src, srcpitch4, width4, height, x, y);
+    }
+}
+
+template __global__ void kl_copy_pad_2plane(uchar4 *dst0, uchar4 *dst1, const int dstpitch4, const uchar4 *__restrict__ src0, const uchar4 *__restrict__ src1, const int srcpitch4, const int width4, const int height, const int hpad4, const int vpad);
+template __global__ void kl_copy_pad_2plane(ushort4 *dst0, ushort4 *dst1, const int dstpitch4, const ushort4 *__restrict__ src0, const ushort4 *__restrict__ src1, const int srcpitch4, const int width4, const int height, const int hpad4, const int vpad);
 
 template <typename pixel_t>
 void cpu_padv(pixel_t* dst, int width, int height, int pitch, int vpad)
@@ -435,7 +488,7 @@ __device__ __host__ uint8_t MakeDiffFlag(int t, int diff, int threshM, int thres
   return flag;
 }
 
-// sref‚Íbase-1ƒ‰ƒCƒ“
+// srefï¿½ï¿½base-1ï¿½ï¿½ï¿½Cï¿½ï¿½
 template <typename vpixel_t>
 void cpu_analyze_frame(uchar4* dst, int dstPitch,
   const vpixel_t* base, const vpixel_t* sref, const vpixel_t* mref,
@@ -456,7 +509,7 @@ void cpu_analyze_frame(uchar4* dst, int dstPitch,
         MakeDiffFlag(t.z, diff.z, threshM, threshS, threshLS),
         MakeDiffFlag(t.w, diff.w, threshM, threshS, threshLS),
       };
-      // ƒtƒ‰ƒOŠi”[
+      // ï¿½tï¿½ï¿½ï¿½Oï¿½iï¿½[
       dst[x + y * dstPitch] = flags;
     }
   }
@@ -486,7 +539,7 @@ __global__ void kl_analyze_frame(uchar4* dst, int dstPitch,
       MakeDiffFlag(t.z, diff.z, threshM, threshS, threshLS),
       MakeDiffFlag(t.w, diff.w, threshM, threshS, threshLS),
     };
-    // ƒtƒ‰ƒOŠi”[
+    // ï¿½tï¿½ï¿½ï¿½Oï¿½iï¿½[
     dst[x + y * dstPitch] = flags;
   }
 }
@@ -769,9 +822,10 @@ void KFMFilterBase::CopyFrameAndPad(Frame& src, Frame& dst, PNeoEnv env)
     }
     {
       dim3 threads(32, 8);
-      dim3 blocks(nblocks(widthUV, threads.x * 4), nblocks(heightUV + 2 * vpadUV, threads.y));
-      kl_copy_pad<vpixel_t> <<<blocks, threads, 0, stream >>> ((vpixel_t *)dstU, dstPitchUV >> 2, (vpixel_t *)srcU, srcPitchUV >> 2, width4UV, heightUV, 0, vpadUV);
-      kl_copy_pad<vpixel_t> <<<blocks, threads, 0, stream >>> ((vpixel_t *)dstV, dstPitchUV >> 2, (vpixel_t *)srcV, srcPitchUV >> 2, width4UV, heightUV, 0, vpadUV);
+      dim3 blocks(nblocks(widthUV, threads.x * 4), nblocks(heightUV + 2 * vpadUV, threads.y), 2);
+      kl_copy_pad_2plane<vpixel_t> <<<blocks, threads, 0, stream >>> ((vpixel_t *)dstU, (vpixel_t *)dstV, dstPitchUV >> 2, (vpixel_t *)srcU, (vpixel_t *)srcV, srcPitchUV >> 2, width4UV, heightUV, 0, vpadUV);
+      //kl_copy_pad<vpixel_t> <<<blocks, threads, 0, stream >>> ((vpixel_t *)dstU, dstPitchUV >> 2, (vpixel_t *)srcU, srcPitchUV >> 2, width4UV, heightUV, 0, vpadUV);
+      //kl_copy_pad<vpixel_t> <<<blocks, threads, 0, stream >>> ((vpixel_t *)dstV, dstPitchUV >> 2, (vpixel_t *)srcV, srcPitchUV >> 2, width4UV, heightUV, 0, vpadUV);
     }
   } else {
     CopyFrame<pixel_t>(src, dst, env);
@@ -818,7 +872,7 @@ void KFMFilterBase::AnalyzeFrame(Frame& f0, Frame& f1, Frame& flag,
 
   int planes[] = { PLANAR_Y, PLANAR_U, PLANAR_V };
 
-  // ŠeƒvƒŒ[ƒ“‚ğ”»’è
+  // ï¿½eï¿½vï¿½ï¿½ï¿½[ï¿½ï¿½ï¿½ğ”»’ï¿½
   for (int pi = 0; pi < 3; ++pi) {
     int p = planes[pi];
 
@@ -1047,7 +1101,7 @@ __global__ void kl_max_extend_blocks_h(pixel_t* dstp, const pixel_t* srcp, int p
 
   if (bx < nBlkX && by < nBlkY) {
     if (bx == nBlkX - 1) {
-      // ‘‚«‚Ş—\’è‚ª‚È‚¢‚Æ‚±‚ë‚Éƒ\[ƒX‚ğƒRƒs[‚·‚é
+      // ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ş—\ï¿½è‚ªï¿½È‚ï¿½ï¿½Æ‚ï¿½ï¿½ï¿½Éƒ\ï¿½[ï¿½Xï¿½ï¿½ï¿½Rï¿½sï¿½[ï¿½ï¿½ï¿½ï¿½
       dstp[bx + by * pitch] = srcp[bx + by * pitch];
     }
     else if (bx == 0) {
@@ -1068,7 +1122,7 @@ __global__ void kl_max_extend_blocks_v(pixel_t* dstp, const pixel_t* srcp, int p
 
   if (bx < nBlkX && by < nBlkY) {
     if (by == nBlkY - 1) {
-      // ‘‚«‚Ş—\’è‚ª‚È‚¢‚Æ‚±‚ë‚Éƒ\[ƒX‚ğƒRƒs[‚·‚é
+      // ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ş—\ï¿½è‚ªï¿½È‚ï¿½ï¿½Æ‚ï¿½ï¿½ï¿½Éƒ\ï¿½[ï¿½Xï¿½ï¿½ï¿½Rï¿½sï¿½[ï¿½ï¿½ï¿½ï¿½
       dstp[bx + by * pitch] = srcp[bx + by * pitch];
     }
     else if (by == 0) {

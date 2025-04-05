@@ -149,6 +149,9 @@ template <typename pixel_t>
 __global__ void kl_copy(pixel_t* dst, const pixel_t* __restrict__ src, int width, int height, int pitch);
 
 template <typename pixel_t>
+__global__ void kl_copy_2plane(pixel_t* dst0, pixel_t* dst1, const pixel_t* __restrict__ src0, const pixel_t* __restrict__ src1, int width, int height, int pitch);
+
+template <typename pixel_t>
 void cpu_average(pixel_t* dst, const pixel_t* __restrict__ src0,
   const pixel_t* __restrict__ src1, int width, int height, int pitch);
 
@@ -168,7 +171,10 @@ template <typename pixel_t>
 void cpu_padv(pixel_t* dst, int width, int height, int pitch, int vpad);
 
 template <typename pixel_t>
-__global__ void kl_copy_pad(pixel_t *dst, const int dstpitch4, const pixel_t *src, const int srcpitch4, const int width4, const int height, const int hpad4, const int vpad);
+__global__ void kl_copy_pad(pixel_t *dst, const int dstpitch4, const pixel_t *__restrict__ src, const int srcpitch4, const int width4, const int height, const int hpad4, const int vpad);
+
+template <typename pixel_t>
+__global__ void kl_copy_pad_2plane(pixel_t *dst0, pixel_t *dst1, const int dstpitch4, const pixel_t *__restrict__ src0, const pixel_t *__restrict__ src1, const int srcpitch4, const int width4, const int height, const int hpad4, const int vpad);
 
 template <typename pixel_t>
 __global__ void kl_padv(pixel_t* dst, int width, int height, int pitch, int vpad);

@@ -1241,11 +1241,12 @@ class KEdgeLevel : public KDebandBase
 
     if (IS_CUDA) {
       dim3 threads(32, 16);
-      dim3 blocksUV(nblocks(width4UV, threads.x), nblocks(heightUV, threads.y));
-      kl_copy << <blocksUV, threads, 0, stream >> > (dstU, srcU, width4UV, heightUV, pitchUV);
-      DEBUG_SYNC;
-      kl_copy << <blocksUV, threads, 0, stream >> > (dstV, srcV, width4UV, heightUV, pitchUV);
-      DEBUG_SYNC;
+      dim3 blocksUV(nblocks(width4UV, threads.x), nblocks(heightUV, threads.y), 2);
+      kl_copy_2plane << <blocksUV, threads, 0, stream >> > (dstU, dstV, srcU, srcV, width4UV, heightUV, pitchUV);
+      //kl_copy << <blocksUV, threads, 0, stream >> > (dstU, srcU, width4UV, heightUV, pitchUV);
+      //DEBUG_SYNC;
+      //kl_copy << <blocksUV, threads, 0, stream >> > (dstV, srcV, width4UV, heightUV, pitchUV);
+      //DEBUG_SYNC;
     }
     else {
       cpu_copy<vpixel_t>(dstU, srcU, width4UV, heightUV, pitchUV);

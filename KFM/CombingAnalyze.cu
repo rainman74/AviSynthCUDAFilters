@@ -358,12 +358,17 @@ public:
   }
 };
 
-__global__ void kl_clean_super(uchar2* __restrict__ dst,
-  const uchar2* __restrict__ prev, const uchar2* __restrict__ cur,
+__global__ void kl_clean_super(uchar2* __restrict__ dst0, uchar2* __restrict__ dst1,
+  const uchar2* __restrict__ prev0, const uchar2* __restrict__ prev1,
+  const uchar2* __restrict__ cur0, const uchar2* __restrict__ cur1,
   int width, int height, int pitch, int thresh)
 {
   int x = threadIdx.x + blockIdx.x * blockDim.x;
   int y = threadIdx.y + blockIdx.y * blockDim.y;
+
+  uchar2* __restrict__ dst = (blockIdx.z == 0) ? dst0 : dst1;
+  const uchar2* __restrict__ prev = (blockIdx.z == 0) ? prev0 : prev1;
+  const uchar2* __restrict__ cur = (blockIdx.z == 0) ? cur0 : cur1;
 
   if (x < width && y < height) {
     uchar2 v = cur[x + y * pitch];
@@ -419,16 +424,19 @@ class KCleanSuper : public KFMFilterBase
 			cudaStream_t stream = static_cast<cudaStream_t>(env->GetDeviceStream());
       dim3 threads(32, 16);
       dim3 blocks(nblocks(width, 32), nblocks(height, 16));
-      dim3 blocksUV(nblocks(widthUV, 32), nblocks(heightUV, 16));
+      dim3 blocksUV(nblocks(widthUV, 32), nblocks(heightUV, 16), 2);
       kl_clean_super << <blocks, threads, 0, stream >> > (
-        dstY, prevY, curY, width, height, pitchY, thY);
+        dstY, nullptr, prevY, nullptr, curY, nullptr, width, height, pitchY, thY);
       DEBUG_SYNC;
       kl_clean_super << <blocksUV, threads, 0, stream >> > (
-        dstU, prevU, curU, widthUV, heightUV, pitchUV, thC);
+        dstU, dstV, prevU, prevV, curU, curV, widthUV, heightUV, pitchUV, thC);
       DEBUG_SYNC;
-      kl_clean_super << <blocksUV, threads, 0, stream >> > (
-        dstV, prevV, curV, widthUV, heightUV, pitchUV, thC);
-      DEBUG_SYNC;
+      //kl_clean_super << <blocksUV, threads, 0, stream >> > (
+      //  dstU, prevU, curU, widthUV, heightUV, pitchUV, thC);
+      //DEBUG_SYNC;
+      //kl_clean_super << <blocksUV, threads, 0, stream >> > (
+      //  dstV, prevV, curV, widthUV, heightUV, pitchUV, thC);
+      //DEBUG_SYNC;
     }
     else {
       cpu_clean_super(
@@ -512,11 +520,48 @@ __global__ void kl_count_cmflags(FMCount* __restrict__ dst,
     dev_reduceN<int, 3, FM_COUNT_THREADS, AddReducer<int>>(tid, cnt, sbuf);
 
     if (tid == 0) {
-      atomicAdd(&dst[i ^ !parity].move, cnt[0]);
-      atomicAdd(&dst[i ^ !parity].shima, cnt[1]);
-      atomicAdd(&dst[i ^ !parity].lshima, cnt[2]);
+      if (cnt[0] > 0) atomicAdd(&dst[i ^ !parity].move, cnt[0]);
+      if (cnt[1] > 0) atomicAdd(&dst[i ^ !parity].shima, cnt[1]);
+      if (cnt[2] > 0) atomicAdd(&dst[i ^ !parity].lshima, cnt[2]);
     }
   }
+}
+
+__global__ void kl_count_cmflags_2planes(FMCount* __restrict__ dst,
+    const uchar2* __restrict__ combe0U, const uchar2* __restrict__ combe1U,
+    const uchar2* __restrict__ combe0V, const uchar2* __restrict__ combe1V,
+    int pitch,
+    int width, int height, int parity,
+    int threshM, int threshS, int threshLS)
+{
+    int bx = threadIdx.x + blockIdx.x * FM_COUNT_TH_W;
+    int by = threadIdx.y + blockIdx.y * FM_COUNT_TH_H;
+    int tid = threadIdx.x + threadIdx.y * FM_COUNT_TH_W;
+
+    for (int i = 0; i < 2; ++i) {
+        int cnt[3] = { 0, 0, 0 };
+
+        if (bx < width && by < height) {
+            auto v = ((i == 0) ? combe0U : combe1U)[bx + by * pitch];
+            if (v.y >= threshM) cnt[0]++;
+            if (v.x >= threshS) cnt[1]++;
+            if (v.x >= threshLS) cnt[2]++;
+
+            v = ((i == 0) ? combe0V : combe1V)[bx + by * pitch];
+            if (v.y >= threshM) cnt[0]++;
+            if (v.x >= threshS) cnt[1]++;
+            if (v.x >= threshLS) cnt[2]++;
+        }
+
+        __shared__ int sbuf[FM_COUNT_THREADS * 3];
+        dev_reduceN<int, 3, FM_COUNT_THREADS, AddReducer<int>>(tid, cnt, sbuf);
+
+        if (tid == 0) {
+            if (cnt[0] > 0) atomicAdd(&dst[i ^ !parity].move, cnt[0]);
+            if (cnt[1] > 0) atomicAdd(&dst[i ^ !parity].shima, cnt[1]);
+            if (cnt[2] > 0) atomicAdd(&dst[i ^ !parity].lshima, cnt[2]);
+        }
+    }
 }
 
 void cpu_count_cmflags(FMCount* __restrict__ dst,
@@ -600,12 +645,15 @@ public:
       kl_count_cmflags << <blocks, threads, 0, stream >> > (
         fmcnt, combe0Y, combe1Y, pitch, width, height, parity, prmY.threshM, prmY.threshS, prmY.threshLS);
       DEBUG_SYNC;
-      kl_count_cmflags << <blocksUV, threads, 0, stream >> > (
-        fmcnt, combe0U, combe1U, pitchUV, widthUV, heightUV, parity, prmC.threshM, prmC.threshS, prmC.threshLS);
+      kl_count_cmflags_2planes << <blocksUV, threads, 0, stream >> > (
+        fmcnt, combe0U, combe1U, combe0V, combe1V, pitchUV, widthUV, heightUV, parity, prmC.threshM, prmC.threshS, prmC.threshLS);
       DEBUG_SYNC;
-      kl_count_cmflags << <blocksUV, threads, 0, stream >> > (
-        fmcnt, combe0V, combe1V, pitchUV, widthUV, heightUV, parity, prmC.threshM, prmC.threshS, prmC.threshLS);
-      DEBUG_SYNC;
+      //kl_count_cmflags << <blocksUV, threads, 0, stream >> > (
+      //  fmcnt, combe0U, combe1U, pitchUV, widthUV, heightUV, parity, prmC.threshM, prmC.threshS, prmC.threshLS);
+      //DEBUG_SYNC;
+      //kl_count_cmflags << <blocksUV, threads, 0, stream >> > (
+      //  fmcnt, combe0V, combe1V, pitchUV, widthUV, heightUV, parity, prmC.threshM, prmC.threshS, prmC.threshLS);
+      //DEBUG_SYNC;
     }
     else {
       memset(fmcnt, 0x00, sizeof(FMCount) * 2);
@@ -858,12 +906,10 @@ class KTelecine : public KFMFilterBase
       if (IS_CUDA) {
         dim3 threads(32, 16);
         dim3 blocks(nblocks(width4, threads.x), nblocks(srcvi.height / 2, threads.y));
-        dim3 blocksUV(nblocks(width4UV, threads.x), nblocks(heightUV / 2, threads.y));
+        dim3 blocksUV(nblocks(width4UV, threads.x), nblocks(heightUV / 2, threads.y), 2);
         kl_copy << <blocks, threads, 0, stream >> > (dstY, src0Y, width4, vi.height / 2, pitchY * 2);
         DEBUG_SYNC;
-        kl_copy << <blocksUV, threads, 0, stream >> > (dstU, src0U, width4UV, heightUV / 2, pitchUV * 2);
-        DEBUG_SYNC;
-        kl_copy << <blocksUV, threads, 0, stream >> > (dstV, src0V, width4UV, heightUV / 2, pitchUV * 2);
+        kl_copy_2plane << <blocksUV, threads, 0, stream >> > (dstU, dstV, src0U, src0V, width4UV, heightUV / 2, pitchUV * 2);
         DEBUG_SYNC;
       }
       else {
