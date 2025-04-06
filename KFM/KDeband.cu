@@ -52,6 +52,25 @@ template<typename vpixel_t> struct TemporalNRPtrs {
   const vpixel_t* in[MAX_TEMPORAL_DIST * 2 + 1];
 };
 
+template<typename pixel_t>
+__host__ __device__ void sum_pixel(int diff, int thresh, pixel_t ref, int& cnt, int& sum)
+{
+    cnt += (diff <= thresh);
+    sum += ref * (diff <= thresh);
+}
+
+template<typename pixel_t>
+__host__ __device__ void average_pixel(int sum, int cnt, pixel_t& out)
+{
+#ifdef __CUDA_ARCH__
+    // CUDA版は __fdividef を使う
+  //#if 0 // あまり変わらないのでCPU版と同じにする
+    out = (int)(__fdividef(sum, cnt) + 0.5f);
+#else
+    out = (int)((float)sum / cnt + 0.5f);
+#endif
+}
+
 template<typename vpixel_t>
 __host__ __device__ void sum_pixel(int4 diff, int thresh, vpixel_t ref, int4& cnt, int4& sum)
 {
@@ -83,7 +102,7 @@ __host__ __device__ void average_pixel(int4 sum, int4 cnt, vpixel_t& out)
 #endif
 }
 
-template<typename vpixel_t>
+template<typename vpixel_t, typename temp_t>
 void cpu_temporal_nr(TemporalNRPtrs<vpixel_t>* data,
   int nframes, int mid, int width, int height, int pitch, int thresh)
 {
@@ -91,11 +110,11 @@ void cpu_temporal_nr(TemporalNRPtrs<vpixel_t>* data,
     for (int x = 0; x < width; ++x) {
       vpixel_t center = data->in[mid][x + y * pitch];
 
-      int4 pixel_count = VHelper<int4>::make(0);
-      int4 sum = VHelper<int4>::make(0);
+      temp_t pixel_count = VHelper<temp_t>::make(0);
+      temp_t sum = VHelper<temp_t>::make(0);
       for (int i = 0; i < nframes; ++i) {
         vpixel_t ref = data->in[i][x + y * pitch];
-        int4 diff = absdiff(ref, center);
+        temp_t diff = absdiff(ref, center);
         sum_pixel(diff, thresh, ref, pixel_count, sum);
       }
 
@@ -104,7 +123,7 @@ void cpu_temporal_nr(TemporalNRPtrs<vpixel_t>* data,
   }
 }
 
-template<typename vpixel_t>
+template<typename vpixel_t, typename temp_t>
 __global__ void kl_temporal_nr(
   const TemporalNRPtrs<vpixel_t>* __restrict__ data,
   int nframes, int mid, int width, int height, int pitch, int thresh)
@@ -117,11 +136,11 @@ __global__ void kl_temporal_nr(
   if (x < width) {
     vpixel_t center = data->in[mid][x + pitch * y];
 
-    int4 pixel_count = VHelper<int4>::make(0);
-    int4 sum = VHelper<int4>::make(0);
+    temp_t pixel_count = VHelper<temp_t>::make(0);
+    temp_t sum = VHelper<temp_t>::make(0);
     for (int i = 0; i < nframes; ++i) {
       vpixel_t ref = data->in[i][x + pitch * y];
-      int4 diff = absdiff(ref, center);
+      temp_t diff = absdiff(ref, center);
       sum_pixel(diff, thresh, ref, pixel_count, sum);
     }
 
@@ -134,11 +153,9 @@ class KTemporalNR : public KDebandBase
   int dist;
   int thresh;
 
-  template <typename pixel_t>
-  PVideoFrame MakeFrames(int n, PNeoEnv env)
-  {
-    typedef typename VectorType<pixel_t>::type vpixel_t;
-		cudaStream_t stream = static_cast<cudaStream_t>(env->GetDeviceStream());
+  template <typename pixel_t, int vecsize, typename temp_t>
+  PVideoFrame run(int n, PNeoEnv env) {
+	cudaStream_t stream = static_cast<cudaStream_t>(env->GetDeviceStream());
 
     int nframes = dist * 2 + 1;
     auto frames = std::unique_ptr<Frame[]>(new Frame[nframes]);
@@ -146,66 +163,78 @@ class KTemporalNR : public KDebandBase
       frames[i] = child->GetFrame(clamp(n - dist + i, 0, vi.num_frames - 1), env);
     }
 
-    TemporalNRPtrs<vpixel_t> *ptrs = new TemporalNRPtrs<vpixel_t>[3];
-    TemporalNRPtrs<vpixel_t>& ptrsY = ptrs[0];
-    TemporalNRPtrs<vpixel_t>& ptrsU = ptrs[1];
-    TemporalNRPtrs<vpixel_t>& ptrsV = ptrs[2];
+    TemporalNRPtrs<pixel_t> *ptrs = new TemporalNRPtrs<pixel_t>[3];
+    TemporalNRPtrs<pixel_t>& ptrsY = ptrs[0];
+    TemporalNRPtrs<pixel_t>& ptrsU = ptrs[1];
+    TemporalNRPtrs<pixel_t>& ptrsV = ptrs[2];
 
     Frame dst = env->NewVideoFrame(vi);
-    ptrsY.out[0] = dst.GetWritePtr<vpixel_t>(PLANAR_Y);
-    ptrsU.out[0] = dst.GetWritePtr<vpixel_t>(PLANAR_U);
-    ptrsV.out[0] = dst.GetWritePtr<vpixel_t>(PLANAR_V);
+    ptrsY.out[0] = dst.GetWritePtr<pixel_t>(PLANAR_Y);
+    ptrsU.out[0] = dst.GetWritePtr<pixel_t>(PLANAR_U);
+    ptrsV.out[0] = dst.GetWritePtr<pixel_t>(PLANAR_V);
     for (int i = 0; i < nframes; ++i) {
-      ptrsY.in[i] = frames[i].GetReadPtr<vpixel_t>(PLANAR_Y);
-      ptrsU.in[i] = frames[i].GetReadPtr<vpixel_t>(PLANAR_U);
-      ptrsV.in[i] = frames[i].GetReadPtr<vpixel_t>(PLANAR_V);
+      ptrsY.in[i] = frames[i].GetReadPtr<pixel_t>(PLANAR_Y);
+      ptrsU.in[i] = frames[i].GetReadPtr<pixel_t>(PLANAR_U);
+      ptrsV.in[i] = frames[i].GetReadPtr<pixel_t>(PLANAR_V);
     }
 
-    int pitchY = dst.GetPitch<vpixel_t>(PLANAR_Y);
-    int pitchUV = dst.GetPitch<vpixel_t>(PLANAR_U);
-    int width4 = vi.width >> 2;
+    int pitchY = dst.GetPitch<pixel_t>(PLANAR_Y);
+    int pitchUV = dst.GetPitch<pixel_t>(PLANAR_U);
+    int width4 = vi.width / vecsize;
     int width4UV = width4 >> logUVx;
     int heightUV = vi.height >> logUVy;
     int mid = nframes / 2;
 
     if (IS_CUDA) {
-      int work_bytes = sizeof(TemporalNRPtrs<vpixel_t>) * 3;
+
+      int work_bytes = sizeof(TemporalNRPtrs<pixel_t>) * 3;
       VideoInfo workvi = VideoInfo();
       workvi.pixel_type = VideoInfo::CS_BGR32;
       workvi.width = 16;
       workvi.height = nblocks(work_bytes, workvi.width * 4);
       Frame work = env->NewVideoFrame(workvi);
 
-      TemporalNRPtrs<vpixel_t>* dptrs =
-        work.GetWritePtr<TemporalNRPtrs<vpixel_t>>();
+      TemporalNRPtrs<pixel_t>* dptrs =
+        work.GetWritePtr<TemporalNRPtrs<pixel_t>>();
       CUDA_CHECK(cudaMemcpyAsync(dptrs, ptrs, work_bytes, cudaMemcpyHostToDevice));
 
       dim3 threads(64);
       dim3 blocks(nblocks(width4, threads.x), vi.height);
       dim3 blocksUV(nblocks(width4UV, threads.x), heightUV);
-      kl_temporal_nr << <blocks, threads, 0, stream >> > (
+      kl_temporal_nr<pixel_t, temp_t><<<blocks, threads, 0, stream >>> (
         &dptrs[0], nframes, mid, width4, vi.height, pitchY, thresh);
       DEBUG_SYNC;
-      kl_temporal_nr << <blocksUV, threads, 0, stream >> > (
+      kl_temporal_nr<pixel_t, temp_t> <<<blocksUV, threads, 0, stream >>> (
         &dptrs[1], nframes, mid, width4UV, heightUV, pitchUV, thresh);
       DEBUG_SYNC;
-      kl_temporal_nr << <blocksUV, threads, 0, stream >> > (
+      kl_temporal_nr<pixel_t, temp_t> <<<blocksUV, threads, 0, stream >>> (
         &dptrs[2], nframes, mid, width4UV, heightUV, pitchUV, thresh);
       DEBUG_SYNC;
 
       // 終わったら解放するコールバックを追加
       env->DeviceAddCallback([](void* arg) {
-        delete[]((TemporalNRPtrs<vpixel_t>*)arg);
+        delete[]((TemporalNRPtrs<pixel_t>*)arg);
       }, ptrs);
     }
     else {
-      cpu_temporal_nr(&ptrsY, nframes, mid, width4, vi.height, pitchY, thresh);
-      cpu_temporal_nr(&ptrsU, nframes, mid, width4UV, heightUV, pitchUV, thresh);
-      cpu_temporal_nr(&ptrsV, nframes, mid, width4UV, heightUV, pitchUV, thresh);
+      cpu_temporal_nr<pixel_t, temp_t>(&ptrsY, nframes, mid, width4, vi.height, pitchY, thresh);
+      cpu_temporal_nr<pixel_t, temp_t>(&ptrsU, nframes, mid, width4UV, heightUV, pitchUV, thresh);
+      cpu_temporal_nr<pixel_t, temp_t>(&ptrsV, nframes, mid, width4UV, heightUV, pitchUV, thresh);
       delete[] ptrs;
     }
 
     return dst.frame;
+  }
+
+  template <typename pixel_t>
+  PVideoFrame MakeFrames(int n, PNeoEnv env)
+  {
+    if ((vi.width % 8) != 0) {
+      return run<pixel_t, 1, int>(n, env);
+    } else {
+      typedef typename VectorType<pixel_t>::type vpixel_t;
+      return run<vpixel_t, 4, int4>(n, env);
+    }
   }
 
 public:
@@ -1223,64 +1252,82 @@ class KEdgeLevel : public KDebandBase
   int logUVx;
   int logUVy;
 
-  template <typename pixel_t>
-  void CopyUV(Frame& dst, Frame& src, PNeoEnv env)
+  template <typename pixel_t, int vecsize>
+  void CopyUV_2(Frame& dst, Frame& src, PNeoEnv env)
   {
-    typedef typename VectorType<pixel_t>::type vpixel_t;
-		cudaStream_t stream = static_cast<cudaStream_t>(env->GetDeviceStream());
+	cudaStream_t stream = static_cast<cudaStream_t>(env->GetDeviceStream());
 
-    const vpixel_t* srcU = src.GetReadPtr<vpixel_t>(PLANAR_U);
-    const vpixel_t* srcV = src.GetReadPtr<vpixel_t>(PLANAR_V);
-    vpixel_t* dstU = dst.GetWritePtr<vpixel_t>(PLANAR_U);
-    vpixel_t* dstV = dst.GetWritePtr<vpixel_t>(PLANAR_V);
+    const pixel_t* srcU = src.GetReadPtr<pixel_t>(PLANAR_U);
+    const pixel_t* srcV = src.GetReadPtr<pixel_t>(PLANAR_V);
+    pixel_t* dstU = dst.GetWritePtr<pixel_t>(PLANAR_U);
+    pixel_t* dstV = dst.GetWritePtr<pixel_t>(PLANAR_V);
 
-    int pitchUV = src.GetPitch<vpixel_t>(PLANAR_U);
-    int width4 = vi.width >> 2;
-    int width4UV = width4 >> logUVx;
+    int pitchUV = src.GetPitch<pixel_t>(PLANAR_U);
+    int width = vi.width / vecsize;
+    int widthUV = width >> logUVx;
     int heightUV = vi.height >> logUVy;
 
     if (IS_CUDA) {
       dim3 threads(32, 16);
-      dim3 blocksUV(nblocks(width4UV, threads.x), nblocks(heightUV, threads.y), 2);
-      kl_copy_2plane << <blocksUV, threads, 0, stream >> > (dstU, dstV, srcU, srcV, width4UV, heightUV, pitchUV);
-      //kl_copy << <blocksUV, threads, 0, stream >> > (dstU, srcU, width4UV, heightUV, pitchUV);
+      dim3 blocksUV(nblocks(widthUV, threads.x), nblocks(heightUV, threads.y), 2);
+      kl_copy_2plane << <blocksUV, threads, 0, stream >> > (dstU, dstV, srcU, srcV, widthUV, heightUV, pitchUV);
+      //kl_copy << <blocksUV, threads, 0, stream >> > (dstU, srcU, widthUV, heightUV, pitchUV);
       //DEBUG_SYNC;
-      //kl_copy << <blocksUV, threads, 0, stream >> > (dstV, srcV, width4UV, heightUV, pitchUV);
+      //kl_copy << <blocksUV, threads, 0, stream >> > (dstV, srcV, widthUV, heightUV, pitchUV);
       //DEBUG_SYNC;
+    } else {
+      cpu_copy<pixel_t>(dstU, srcU, widthUV, heightUV, pitchUV);
+      cpu_copy<pixel_t>(dstV, srcV, widthUV, heightUV, pitchUV);
     }
-    else {
-      cpu_copy<vpixel_t>(dstU, srcU, width4UV, heightUV, pitchUV);
-      cpu_copy<vpixel_t>(dstV, srcV, width4UV, heightUV, pitchUV);
+  }
+
+  template <typename pixel_t>
+  void CopyUV(Frame& dst, Frame& src, PNeoEnv env)
+  {
+    if ((vi.width % 8) != 0) {
+      CopyUV_2<pixel_t, 1>(dst, src, env);
+    } else {
+      typedef typename VectorType<pixel_t>::type vpixel_t;
+      CopyUV_2<vpixel_t, 4>(dst, src, env);
+    }
+  }
+
+  template <typename pixel_t, int vecsize>
+  void ClearUV_2(Frame& dst, PNeoEnv env)
+  {
+	cudaStream_t stream = static_cast<cudaStream_t>(env->GetDeviceStream());
+
+    pixel_t* dstU = dst.GetWritePtr<pixel_t>(PLANAR_U);
+    pixel_t* dstV = dst.GetWritePtr<pixel_t>(PLANAR_V);
+
+    int pitchUV = dst.GetPitch<pixel_t>(PLANAR_U);
+    int width = vi.width / vecsize;
+    int widthUV = width >> logUVx;
+    int heightUV = vi.height >> logUVy;
+
+    pixel_t zerov = VHelper<pixel_t>::make(1 << (vi.BitsPerComponent() - 1));
+
+    if (IS_CUDA) {
+      dim3 threads(32, 16);
+      dim3 blocksUV(nblocks(widthUV, threads.x), nblocks(heightUV, threads.y));
+      kl_fill << <blocksUV, threads, 0, stream >> > (dstU, zerov, widthUV, heightUV, pitchUV);
+      DEBUG_SYNC;
+      kl_fill << <blocksUV, threads, 0, stream >> > (dstV, zerov, widthUV, heightUV, pitchUV);
+      DEBUG_SYNC;
+    } else {
+      cpu_fill<pixel_t>(dstU, zerov, widthUV, heightUV, pitchUV);
+      cpu_fill<pixel_t>(dstV, zerov, widthUV, heightUV, pitchUV);
     }
   }
 
   template <typename pixel_t>
   void ClearUV(Frame& dst, PNeoEnv env)
   {
-    typedef typename VectorType<pixel_t>::type vpixel_t;
-		cudaStream_t stream = static_cast<cudaStream_t>(env->GetDeviceStream());
-
-    vpixel_t* dstU = dst.GetWritePtr<vpixel_t>(PLANAR_U);
-    vpixel_t* dstV = dst.GetWritePtr<vpixel_t>(PLANAR_V);
-
-    int pitchUV = dst.GetPitch<vpixel_t>(PLANAR_U);
-    int width4 = vi.width >> 2;
-    int width4UV = width4 >> logUVx;
-    int heightUV = vi.height >> logUVy;
-
-    vpixel_t zerov = VHelper<vpixel_t>::make(1 << (vi.BitsPerComponent() - 1));
-
-    if (IS_CUDA) {
-      dim3 threads(32, 16);
-      dim3 blocksUV(nblocks(width4UV, threads.x), nblocks(heightUV, threads.y));
-      kl_fill << <blocksUV, threads, 0, stream >> > (dstU, zerov, width4UV, heightUV, pitchUV);
-      DEBUG_SYNC;
-      kl_fill << <blocksUV, threads, 0, stream >> > (dstV, zerov, width4UV, heightUV, pitchUV);
-      DEBUG_SYNC;
-    }
-    else {
-      cpu_fill<vpixel_t>(dstU, zerov, width4UV, heightUV, pitchUV);
-      cpu_fill<vpixel_t>(dstV, zerov, width4UV, heightUV, pitchUV);
+    if ((vi.width % 8) != 0) {
+      ClearUV_2<pixel_t, 1>(dst, env);
+    } else {
+      typedef typename VectorType<pixel_t>::type vpixel_t;
+      ClearUV_2<vpixel_t, 4>(dst, env);
     }
   }
 
