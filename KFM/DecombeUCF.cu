@@ -1,6 +1,7 @@
 
 #include <stdint.h>
 #include <avisynth.h>
+#include "rgy_osdep.h"
 
 #include <algorithm>
 #include <memory>
@@ -14,6 +15,11 @@
 #include "ReduceKernel.cuh"
 #include "KFMFilterBase.cuh"
 #include "TextOut.h"
+
+static int scaleParam(float thresh, int pixelBits)
+{
+  return (int)(thresh * (1 << (pixelBits - 8)) + 0.5f);
+}
 
 template <typename vpixel_t>
 void cpu_calc_field_diff(const vpixel_t* ptr, int nt, int width, int height, int pitch, unsigned long long int *sum)
@@ -41,13 +47,13 @@ enum {
   CALC_FIELD_DIFF_THREADS = CALC_FIELD_DIFF_X * CALC_FIELD_DIFF_Y
 };
 
-__global__ void kl_init_uint64(uint64_t* sum)
+__global__ void kl_init_uint64(unsigned long long* sum)
 {
   sum[threadIdx.x] = 0;
 }
 
 template <typename vpixel_t>
-__global__ void kl_calculate_field_diff(const vpixel_t* ptr, int nt, int width, int height, int pitch, uint64_t* sum)
+__global__ void kl_calculate_field_diff(const vpixel_t* ptr, int nt, int width, int height, int pitch, unsigned long long* sum)
 {
   int x = threadIdx.x + blockIdx.x * blockDim.x;
   int y = threadIdx.y + blockIdx.y * blockDim.y;
@@ -725,7 +731,7 @@ void cpu_analyze_noise(uint64_t* result,
 }
 
 __global__ void kl_analyze_noise(
-  uint64_t* result,
+  unsigned long long* result,
   const uchar4* src0, const uchar4* src1, const uchar4* src2,
   int width, int height, int pitch)
 {
@@ -801,7 +807,7 @@ void cpu_analyze_diff(
 
 template <typename vpixel_t>
 __global__ void kl_analyze_diff(
-  uint64_t* result, const vpixel_t* f0, const vpixel_t* f1,
+  unsigned long long* result, const vpixel_t* f0, const vpixel_t* f1,
   int width, int height, int pitch)
 {
   int x = threadIdx.x + blockIdx.x * blockDim.x;
@@ -855,7 +861,7 @@ __global__ void kl_analyze_diff(
 }
 
 template __global__ void kl_analyze_diff(
-  uint64_t* result, const uchar4* f0, const uchar4* f1,
+  unsigned long long* result, const uchar4* f0, const uchar4* f1,
   int width, int height, int pitch);
 
 struct NoiseResult {
@@ -916,7 +922,7 @@ class KAnalyzeNoise : public KFMFilterBase
   void InitAnalyze(uint64_t* result, PNeoEnv env) {
     if (IS_CUDA) {
 			cudaStream_t stream = static_cast<cudaStream_t>(env->GetDeviceStream());
-      kl_init_uint64 << <1, sizeof(NoiseResult) * 2 / sizeof(uint64_t), 0, stream >> > (result);
+      kl_init_uint64 << <1, sizeof(NoiseResult) * 2 / sizeof(uint64_t), 0, stream >> > ((unsigned long long *)result);
       DEBUG_SYNC;
     }
     else {
@@ -950,11 +956,11 @@ class KAnalyzeNoise : public KFMFilterBase
       dim3 threads(CALC_FIELD_DIFF_X, CALC_FIELD_DIFF_Y);
       dim3 blocks(nblocks(width, threads.x), nblocks(height, threads.y));
       dim3 blocksUV(nblocks(widthUV, threads.x), nblocks(heightUV, threads.y));
-      kl_analyze_noise << <blocks, threads, 0, stream >> > (resultY, src0Y, src1Y, src2Y, width, height, pitchY);
+      kl_analyze_noise << <blocks, threads, 0, stream >> > ((unsigned long long *)resultY, src0Y, src1Y, src2Y, width, height, pitchY);
       DEBUG_SYNC;
-      kl_analyze_noise << <blocksUV, threads, 0, stream >> > (resultUV, src0U, src1U, src2U, widthUV, heightUV, pitchUV);
+      kl_analyze_noise << <blocksUV, threads, 0, stream >> > ((unsigned long long *)resultUV, src0U, src1U, src2U, widthUV, heightUV, pitchUV);
       DEBUG_SYNC;
-      kl_analyze_noise << <blocksUV, threads, 0, stream >> > (resultUV, src0V, src1V, src2V, widthUV, heightUV, pitchUV);
+      kl_analyze_noise << <blocksUV, threads, 0, stream >> > ((unsigned long long *)resultUV, src0V, src1V, src2V, widthUV, heightUV, pitchUV);
       DEBUG_SYNC;
     }
     else {
@@ -987,11 +993,11 @@ class KAnalyzeNoise : public KFMFilterBase
       dim3 threads(CALC_FIELD_DIFF_X, CALC_FIELD_DIFF_Y);
       dim3 blocks(nblocks(width, threads.x), nblocks(height, threads.y));
       dim3 blocksUV(nblocks(widthUV, threads.x), nblocks(heightUV, threads.y));
-      kl_analyze_diff << <blocks, threads, 0, stream >> > (resultY, src0Y, src1Y, width, height, pitchY);
+      kl_analyze_diff << <blocks, threads, 0, stream >> > ((unsigned long long *)resultY, src0Y, src1Y, width, height, pitchY);
       DEBUG_SYNC;
-      kl_analyze_diff << <blocksUV, threads, 0, stream >> > (resultUV, src0U, src1U, widthUV, heightUV, pitchUV);
+      kl_analyze_diff << <blocksUV, threads, 0, stream >> > ((unsigned long long *)resultUV, src0U, src1U, widthUV, heightUV, pitchUV);
       DEBUG_SYNC;
-      kl_analyze_diff << <blocksUV, threads, 0, stream >> > (resultUV, src0V, src1V, widthUV, heightUV, pitchUV);
+      kl_analyze_diff << <blocksUV, threads, 0, stream >> > ((unsigned long long *)resultUV, src0V, src1V, widthUV, heightUV, pitchUV);
       DEBUG_SYNC;
     }
     else {
@@ -1279,7 +1285,7 @@ public:
     DecombUCFParam::SetParam(vi, &this->param);
   }
   PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env) { return PVideoFrame(); }
-  void __stdcall GetAudio(void* buf, __int64 start, __int64 count, IScriptEnvironment* env) { }
+  void __stdcall GetAudio(void* buf, int64_t start, int64_t count, IScriptEnvironment* env) { }
   const VideoInfo& __stdcall GetVideoInfo() { return vi; }
   bool __stdcall GetParity(int n) { return true; }
   int __stdcall SetCacheHints(int cachehints, int frame_range) {
@@ -1759,9 +1765,17 @@ public:
           PVideoFrame frame = dweaveclip->GetFrame(n60, env);
           int sourceStart = n60 / 2;
           int sourceEnd = (n60 + 2 + 1) / 2;
+#if AVISYNTH_MODE == AVISYNTH_NEO
           env->MakePropertyWritable(&frame);
           frame->SetProperty("KFM_SourceStart", sourceStart);
           frame->SetProperty("KFM_NumSourceFrames", sourceEnd - sourceStart);
+#elif AVISYNTH_MODE == AVISYNTH_PLUS
+          auto avsmap = env->getFramePropsRW(frame);
+          env->propSetInt(avsmap, "KFM_SourceStart", sourceStart, AVSPropAppendMode::PROPAPPENDMODE_REPLACE);
+          env->propSetInt(avsmap, "KFM_NumSourceFrames", sourceEnd - sourceStart, AVSPropAppendMode::PROPAPPENDMODE_REPLACE);
+#else
+          static_assert(false, "Invalid AVISYNTH_MODE");
+#endif
           return frame;
         }
       }
@@ -1772,18 +1786,34 @@ public:
           // 1枚目のフィールドは綺麗 -> 後ろのフィールドは汚いので前のフィールドを使って補間
           PVideoFrame frame = beforeclip->GetFrame(n60start, env);
           int sourceStart = n60start / 2;
+#if AVISYNTH_MODE == AVISYNTH_NEO
           env->MakePropertyWritable(&frame);
           frame->SetProperty("KFM_SourceStart", sourceStart);
           frame->SetProperty("KFM_NumSourceFrames", 1);
+#elif AVISYNTH_MODE == AVISYNTH_PLUS
+          auto avsmap = env->getFramePropsRW(frame);
+          env->propSetInt(avsmap, "KFM_SourceStart", sourceStart, AVSPropAppendMode::PROPAPPENDMODE_REPLACE);
+          env->propSetInt(avsmap, "KFM_NumSourceFrames", 1, AVSPropAppendMode::PROPAPPENDMODE_REPLACE);
+#else
+          static_assert(false, "Invalid AVISYNTH_MODE");
+#endif
           return frame;
         }
         else if (cleanField[1]) {
           // 2枚目のフィールドは綺麗 -> 前のフィールドは汚いので後ろのフィールドを使って補間
           PVideoFrame frame = afterclip->GetFrame(n60start + 1, env);
           int sourceStart = (n60start + 1) / 2;
+#if AVISYNTH_MODE == AVISYNTH_NEO
           env->MakePropertyWritable(&frame);
           frame->SetProperty("KFM_SourceStart", sourceStart);
           frame->SetProperty("KFM_NumSourceFrames", 1);
+#elif AVISYNTH_MODE == AVISYNTH_PLUS
+          auto avsmap = env->getFramePropsRW(frame);
+          env->propSetInt(avsmap, "KFM_SourceStart", sourceStart, AVSPropAppendMode::PROPAPPENDMODE_REPLACE);
+          env->propSetInt(avsmap, "KFM_NumSourceFrames", 1, AVSPropAppendMode::PROPAPPENDMODE_REPLACE);
+#else
+          static_assert(false, "Invalid AVISYNTH_MODE");
+#endif
           return frame;
         }
       }
@@ -1967,7 +1997,14 @@ public:
     }
 
     PVideoFrame res = env->NewVideoFrame(vi);
+#if AVISYNTH_MODE == AVISYNTH_NEO
     res->SetProperty(DECOMB_UCF_FLAG_STR, (AVSMapValue)(int)flag);
+#elif AVISYNTH_MODE == AVISYNTH_PLUS
+    AVSMap* avsmap = env->getFramePropsRW(res);
+    env->propSetInt(avsmap, DECOMB_UCF_FLAG_STR, (int)flag, AVSPropAppendMode::PROPAPPENDMODE_REPLACE);
+#else
+    static_assert(false, "Invalid AVISYNTH_MODE");
+#endif
     return res;
   }
 
@@ -2089,7 +2126,15 @@ public:
     // 前後のフレームも考慮する
     for (int i = -1; i < 2; ++i) {
       PVideoFrame frame = flagclip->GetFrame(n60 + i, env);
+#if AVISYNTH_MODE == AVISYNTH_NEO
       auto flag = (DECOMB_UCF_FLAG)frame->GetProperty(DECOMB_UCF_FLAG_STR, -1);
+#elif AVISYNTH_MODE == AVISYNTH_PLUS
+      int error;
+      auto flag = (DECOMB_UCF_FLAG)env->propGetInt(env->getFramePropsRO(frame), DECOMB_UCF_FLAG_STR, 0, &error);
+      if (error) flag = (DECOMB_UCF_FLAG)(-1);
+#else
+      static_assert(false, "Invalid AVISYNTH_MODE");
+#endif
       if (flag == DECOMB_UCF_NR) {
         useNR = true;
       }
@@ -2132,12 +2177,19 @@ public:
     else {
       res = child->GetFrame(n60, env);
     }
-
+#if AVISYNTH_MODE == AVISYNTH_NEO
     env->MakePropertyWritable(&res);
     env->CopyFrameProps(centerFrame, res);
     res->SetProperty("KFM_SourceStart", n60 / 2);
     res->SetProperty("KFM_NumSourceFrames", 1);
-
+#elif AVISYNTH_MODE == AVISYNTH_PLUS
+    env->copyFrameProps(centerFrame, res);
+    auto avsmap = env->getFramePropsRW(res);
+    env->propSetInt(avsmap, "KFM_SourceStart", n60 / 2, AVSPropAppendMode::PROPAPPENDMODE_REPLACE);
+    env->propSetInt(avsmap, "KFM_NumSourceFrames", 1, AVSPropAppendMode::PROPAPPENDMODE_REPLACE);
+#else
+    static_assert(false, "Invalid AVISYNTH_MODE");
+#endif
     return res;
   }
 

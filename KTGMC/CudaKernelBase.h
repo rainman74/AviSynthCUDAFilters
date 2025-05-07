@@ -1,12 +1,11 @@
-#pragma once
+ï»¿#pragma once
 #include "avisynth.h"
 
-#define NOMINMAX
-#include <windows.h>
+#include "rgy_osdep.h"
 
 #include "CommonFunctions.h"
 
-// CUDAƒJ[ƒlƒ‹À‘•‚Ì‹¤’Êˆ—
+// CUDAã‚«ãƒ¼ãƒãƒ«å®Ÿè£…ã®å…±é€šå‡¦ç†
 class CudaKernelBase
 {
 protected:

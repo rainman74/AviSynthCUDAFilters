@@ -42,6 +42,50 @@
 #include <stdint.h>
 #include "../AvsCUDA.h"
 
+RGY_TARGET("sse4.1")
+static RGY_FORCEINLINE __m128i af_mm_packus_epi32_sse41(__m128i a, __m128i b) {
+	return _mm_packus_epi32(a, b);
+}
+
+template<bool useSSE41>
+static RGY_FORCEINLINE __m128i af_mm_packus_epi32(__m128i a, __m128i b) {
+	if constexpr(useSSE41) {
+		return af_mm_packus_epi32_sse41(a, b);
+	} else {
+		return _MM_PACKUS_EPI32(a, b);
+	}
+}
+
+RGY_TARGET("sse4.1")
+static RGY_FORCEINLINE __m128i af_mm_mullo_epi32_sse41(__m128i &a, __m128i &b) {
+	return _mm_mullo_epi32(a, b);
+}
+
+template<bool useSSE4>
+static RGY_FORCEINLINE __m128i af_mm_mullo_epi32(__m128i &a, __m128i &b) {
+   __m128i result;
+  if constexpr(useSSE4) {
+    result = af_mm_mullo_epi32_sse41(a, b);
+  } else {
+    result = _MM_MULLO_EPI32(a, b);
+  }
+  return result;
+}
+
+RGY_TARGET("sse4.1")
+static RGY_FORCEINLINE __m128i af_mm_min_epu16_sse41(__m128i a, __m128i b) {
+	return _mm_min_epu16(a, b);
+}
+
+template<bool useSSE41>
+static RGY_FORCEINLINE __m128i af_mm_min_epu16(__m128i a, __m128i b) {
+	if constexpr(useSSE41) {
+		return af_mm_min_epu16_sse41(a, b);
+	} else {
+		return _MM_MIN_EPU16(a, b);
+	}
+}
+
 
 /********************************************************************
 ***** Declare index of new filters for Avisynth's filter engine *****
@@ -77,7 +121,7 @@ AdjustFocusV::AdjustFocusV(double _amount, PClip _child)
 
 template<typename pixel_t>
 static void af_vertical_c(BYTE* line_buf8, BYTE* dstp8, const int height, const int pitch8, const int width, const int half_amount, int bits_per_pixel) {
-  typedef typename std::conditional < sizeof(pixel_t) == 1, int, __int64>::type weight_t;
+  typedef typename std::conditional < sizeof(pixel_t) == 1, int, int64_t>::type weight_t;
   // kernel:[(1-1/2^_amount)/2, 1/2^_amount, (1-1/2^_amount)/2]
   weight_t center_weight = half_amount*2;    // *2: 16 bit scaled arithmetic, but the converted amount parameter scaled is only 15 bits
   weight_t outer_weight = 32768-half_amount; // (1-1/2^_amount)/2  32768 = 0.5
@@ -90,7 +134,7 @@ static void af_vertical_c(BYTE* line_buf8, BYTE* dstp8, const int height, const 
   for (int y = height-1; y>0; --y) {
     for (int x = 0; x < width; ++x) {
       pixel_t a;
-      // Note: ScaledPixelClip is overloaded. With __int64 parameter and uint16_t result works for 16 bit
+      // Note: ScaledPixelClip is overloaded. With int64_t parameter and uint16_t result works for 16 bit
       if(sizeof(pixel_t) == 1)
         a = ScaledPixelClip((weight_t)(dstp[x] * center_weight + (line_buf[x] + dstp[x+pitch]) * outer_weight));
       else
@@ -167,7 +211,7 @@ static void af_vertical_sse2_float(BYTE* line_buf, BYTE* dstp, const int height,
 }
 
 
-static __forceinline __m128i af_blend_sse2(__m128i &upper, __m128i &center, __m128i &lower, __m128i &center_weight, __m128i &outer_weight, __m128i &round_mask) {
+static RGY_FORCEINLINE __m128i af_blend_sse2(__m128i &upper, __m128i &center, __m128i &lower, __m128i &center_weight, __m128i &outer_weight, __m128i &round_mask) {
   __m128i outer_tmp = _mm_add_epi16(upper, lower);
   __m128i center_tmp = _mm_mullo_epi16(center, center_weight);
 
@@ -180,17 +224,11 @@ static __forceinline __m128i af_blend_sse2(__m128i &upper, __m128i &center, __m1
 }
 
 template<bool useSSE4>
-static __forceinline __m128i af_blend_uint16_t_sse2(__m128i &upper, __m128i &center, __m128i &lower, __m128i &center_weight, __m128i &outer_weight, __m128i &round_mask) {
+static RGY_FORCEINLINE __m128i af_blend_uint16_t_sse2(__m128i &upper, __m128i &center, __m128i &lower, __m128i &center_weight, __m128i &outer_weight, __m128i &round_mask) {
   __m128i outer_tmp = _mm_add_epi32(upper, lower);
   __m128i center_tmp;
-  if (useSSE4) {
-    center_tmp = _mm_mullo_epi32(center, center_weight);
-    outer_tmp = _mm_mullo_epi32(outer_tmp, outer_weight);
-  }
-  else {
-    center_tmp = _MM_MULLO_EPI32(center, center_weight);
-    outer_tmp = _MM_MULLO_EPI32(outer_tmp, outer_weight);
-  }
+  center_tmp = af_mm_mullo_epi32<useSSE4>(center, center_weight);
+  outer_tmp = af_mm_mullo_epi32<useSSE4>(outer_tmp, outer_weight);
 
   __m128i result = _mm_add_epi32(center_tmp, outer_tmp);
   result = _mm_add_epi32(result, center_tmp);
@@ -198,14 +236,14 @@ static __forceinline __m128i af_blend_uint16_t_sse2(__m128i &upper, __m128i &cen
   return _mm_srai_epi32(result, 7);
 }
 
-static __forceinline __m128 af_blend_float_sse2(__m128 &upper, __m128 &center, __m128 &lower, __m128 &center_weight, __m128 &outer_weight) {
+static RGY_FORCEINLINE __m128 af_blend_float_sse2(__m128 &upper, __m128 &center, __m128 &lower, __m128 &center_weight, __m128 &outer_weight) {
   __m128 tmp1 = _mm_mul_ps(center, center_weight);
   __m128 tmp2 = _mm_mul_ps(_mm_add_ps(upper, lower), outer_weight);
   return _mm_add_ps(tmp1, tmp2);
 }
 
 
-static __forceinline __m128i af_unpack_blend_sse2(__m128i &left, __m128i &center, __m128i &right, __m128i &center_weight, __m128i &outer_weight, __m128i &round_mask, __m128i &zero) {
+static RGY_FORCEINLINE __m128i af_unpack_blend_sse2(__m128i &left, __m128i &center, __m128i &right, __m128i &center_weight, __m128i &outer_weight, __m128i &round_mask, __m128i &zero) {
   __m128i left_lo = _mm_unpacklo_epi8(left, zero);
   __m128i left_hi = _mm_unpackhi_epi8(left, zero);
   __m128i center_lo = _mm_unpacklo_epi8(center, zero);
@@ -220,7 +258,7 @@ static __forceinline __m128i af_unpack_blend_sse2(__m128i &left, __m128i &center
 }
 
 template<bool useSSE4>
-static __forceinline __m128i af_unpack_blend_uint16_t_sse2(__m128i &left, __m128i &center, __m128i &right, __m128i &center_weight, __m128i &outer_weight, __m128i &round_mask, __m128i &zero) {
+static RGY_FORCEINLINE __m128i af_unpack_blend_uint16_t_sse2(__m128i &left, __m128i &center, __m128i &right, __m128i &center_weight, __m128i &outer_weight, __m128i &round_mask, __m128i &zero) {
   __m128i left_lo = _mm_unpacklo_epi16(left, zero);
   __m128i left_hi = _mm_unpackhi_epi16(left, zero);
   __m128i center_lo = _mm_unpacklo_epi16(center, zero);
@@ -230,9 +268,12 @@ static __forceinline __m128i af_unpack_blend_uint16_t_sse2(__m128i &left, __m128
 
   __m128i result_lo = af_blend_uint16_t_sse2<useSSE4>(left_lo, center_lo, right_lo, center_weight, outer_weight, round_mask);
   __m128i result_hi = af_blend_uint16_t_sse2<useSSE4>(left_hi, center_hi, right_hi, center_weight, outer_weight, round_mask);
+
+#if defined(__SSE4_1__) && !(defined(_WIN32) || defined(_WIN64))
   if(useSSE4)
     return _mm_packus_epi32(result_lo, result_hi);
   else
+#endif
     return _MM_PACKUS_EPI32(result_lo, result_hi);
 }
 
@@ -263,12 +304,7 @@ static void af_vertical_uint16_t_sse2(BYTE* line_buf, BYTE* dstp, int height, in
       __m128i result_lo = af_blend_uint16_t_sse2<useSSE4>(upper_lo, center_lo, lower_lo, center_weight, outer_weight, round_mask);
       __m128i result_hi = af_blend_uint16_t_sse2<useSSE4>(upper_hi, center_hi, lower_hi, center_weight, outer_weight, round_mask);
 
-      __m128i result;
-      if(useSSE4)
-        result = _mm_packus_epi32(result_lo, result_hi);
-      else
-        result = _MM_PACKUS_EPI32(result_lo, result_hi);
-
+      __m128i result = af_mm_packus_epi32<useSSE4>(result_lo, result_hi);
       _mm_store_si128(reinterpret_cast<__m128i*>(dstp + x), result);
     }
     dstp += pitch;
@@ -287,12 +323,7 @@ static void af_vertical_uint16_t_sse2(BYTE* line_buf, BYTE* dstp, int height, in
     __m128i result_lo = af_blend_uint16_t_sse2<useSSE4>(upper_lo, center_lo, center_lo, center_weight, outer_weight, round_mask);
     __m128i result_hi = af_blend_uint16_t_sse2<useSSE4>(upper_hi, center_hi, center_hi, center_weight, outer_weight, round_mask);
 
-    __m128i result;
-    if (useSSE4)
-      result = _mm_packus_epi32(result_lo, result_hi);
-    else
-      result = _MM_PACKUS_EPI32(result_lo, result_hi);
-
+    __m128i result = af_mm_packus_epi32<useSSE4>(result_lo, result_hi);
     _mm_store_si128(reinterpret_cast<__m128i*>(dstp + x), result);
   }
 }
@@ -349,7 +380,7 @@ static void af_vertical_sse2(BYTE* line_buf, BYTE* dstp, int height, int pitch, 
 
 #ifdef X86_32
 
-static __forceinline __m64 af_blend_mmx(__m64 &upper, __m64 &center, __m64 &lower, __m64 &center_weight, __m64 &outer_weight, __m64 &round_mask) {
+static RGY_FORCEINLINE __m64 af_blend_mmx(__m64 &upper, __m64 &center, __m64 &lower, __m64 &center_weight, __m64 &outer_weight, __m64 &round_mask) {
   __m64 outer_tmp = _mm_add_pi16(upper, lower);
   __m64 center_tmp = _mm_mullo_pi16(center, center_weight);
 
@@ -361,7 +392,7 @@ static __forceinline __m64 af_blend_mmx(__m64 &upper, __m64 &center, __m64 &lowe
   return _mm_srai_pi16(result, 7);
 }
 
-static __forceinline __m64 af_unpack_blend_mmx(__m64 &left, __m64 &center, __m64 &right, __m64 &center_weight, __m64 &outer_weight, __m64 &round_mask, __m64 &zero) {
+static RGY_FORCEINLINE __m64 af_unpack_blend_mmx(__m64 &left, __m64 &center, __m64 &right, __m64 &center_weight, __m64 &outer_weight, __m64 &round_mask, __m64 &zero) {
   __m64 left_lo = _mm_unpacklo_pi8(left, zero);
   __m64 left_hi = _mm_unpackhi_pi8(left, zero);
   __m64 center_lo = _mm_unpacklo_pi8(center, zero);
@@ -535,7 +566,7 @@ AdjustFocusH::AdjustFocusH(double _amount, PClip _child)
 // --------------------------------------
 
 template<typename pixel_t, typename weight_t>
-static __forceinline void af_horizontal_rgb32_process_line_c(pixel_t b_left, pixel_t g_left, pixel_t r_left, pixel_t a_left, pixel_t *dstp, size_t width, weight_t center_weight, weight_t outer_weight) {
+static RGY_FORCEINLINE void af_horizontal_rgb32_process_line_c(pixel_t b_left, pixel_t g_left, pixel_t r_left, pixel_t a_left, pixel_t *dstp, size_t width, weight_t center_weight, weight_t outer_weight) {
   size_t x;
   for (x = 0; x < width-1; ++x)
   {
@@ -560,7 +591,7 @@ static __forceinline void af_horizontal_rgb32_process_line_c(pixel_t b_left, pix
 
 template<typename pixel_t>
 static void af_horizontal_rgb32_64_c(BYTE* dstp8, size_t height, size_t pitch8, size_t width, int half_amount) {
-  typedef typename std::conditional < sizeof(pixel_t) == 1, int, __int64>::type weight_t;
+  typedef typename std::conditional < sizeof(pixel_t) == 1, int, int64_t>::type weight_t;
   // kernel:[(1-1/2^_amount)/2, 1/2^_amount, (1-1/2^_amount)/2]
   weight_t center_weight = half_amount*2;    // *2: 16 bit scaled arithmetic, but the converted amount parameter scaled is only 15 bits
   weight_t outer_weight = 32768-half_amount; // (1-1/2^_amount)/2  32768 = 0.5
@@ -776,7 +807,7 @@ static void af_horizontal_yuy2_c(BYTE* p, int height, int pitch, int width, int 
 }
 
 
-static __forceinline __m128i af_blend_yuy2_sse2(__m128i &left, __m128i &center, __m128i &right, __m128i &luma_mask,
+static RGY_FORCEINLINE __m128i af_blend_yuy2_sse2(__m128i &left, __m128i &center, __m128i &right, __m128i &luma_mask,
                                              __m128i &center_weight, __m128i &outer_weight, __m128i &round_mask) {
   __m128i left_luma = _mm_and_si128(left, luma_mask); //0 Y5 0 Y4 0 Y3 0 Y2 0 Y1 0 Y0 0 Y-1 0 Y-2
   __m128i center_luma = _mm_and_si128(center, luma_mask); //0 Y7 0 Y6 0 Y5 0 Y4 0 Y3 0 Y2 0 Y1 0 Y0
@@ -883,7 +914,7 @@ static void af_horizontal_yuy2_sse2(BYTE* dstp, const BYTE* srcp, size_t dst_pit
 // Blur/Sharpen Horizontal YUY2 MMX Code
 // -------------------------------------
 //
-static __forceinline __m64 af_blend_yuy2_mmx(__m64 &left, __m64 &center, __m64 &right, __m64 &luma_mask,
+static RGY_FORCEINLINE __m64 af_blend_yuy2_mmx(__m64 &left, __m64 &center, __m64 &right, __m64 &luma_mask,
                            __m64 &center_weight, __m64 &outer_weight, __m64 &round_mask) {
   __m64 left_luma = _mm_and_si64(left, luma_mask); //0 Y1 0 Y0 0 Y-1 0 Y-2
   __m64 center_luma = _mm_and_si64(center, luma_mask); //0 Y3 0 Y2 0 Y1 0 Y0
@@ -992,7 +1023,7 @@ static void af_horizontal_yuy2_mmx(BYTE* dstp, const BYTE* srcp, size_t dst_pitc
 
 template<typename pixel_t>
 static void af_horizontal_rgb24_48_c(BYTE* dstp8, int height, int pitch8, int width, int half_amount) {
-  typedef typename std::conditional < sizeof(pixel_t) == 1, int, __int64>::type weight_t;
+  typedef typename std::conditional < sizeof(pixel_t) == 1, int, int64_t>::type weight_t;
   // kernel:[(1-1/2^_amount)/2, 1/2^_amount, (1-1/2^_amount)/2]
   weight_t center_weight = half_amount*2;    // *2: 16 bit scaled arithmetic, but the converted amount parameter scaled is only 15 bits
   weight_t outer_weight = 32768-half_amount; // (1-1/2^_amount)/2  32768 = 0.5
@@ -1027,10 +1058,10 @@ static void af_horizontal_rgb24_48_c(BYTE* dstp8, int height, int pitch8, int wi
 // -------------------------------------
 
 template<typename pixel_t>
-static __forceinline void af_horizontal_planar_process_line_c(pixel_t left, BYTE *dstp8, size_t row_size, int center_weight, int outer_weight) {
+static RGY_FORCEINLINE void af_horizontal_planar_process_line_c(pixel_t left, BYTE *dstp8, size_t row_size, int center_weight, int outer_weight) {
   size_t x;
   pixel_t* dstp = reinterpret_cast<pixel_t *>(dstp8);
-  typedef typename std::conditional < sizeof(pixel_t) == 1, int, __int64>::type weight_t; // for calling the right ScaledPixelClip()
+  typedef typename std::conditional < sizeof(pixel_t) == 1, int, int64_t>::type weight_t; // for calling the right ScaledPixelClip()
   size_t width = row_size / sizeof(pixel_t);
   for (x = 0; x < width-1; ++x) {
     pixel_t temp = ScaledPixelClip((weight_t)(dstp[x] * (weight_t)center_weight + (left + dstp[x+1]) * (weight_t)outer_weight));
@@ -1041,12 +1072,12 @@ static __forceinline void af_horizontal_planar_process_line_c(pixel_t left, BYTE
   dstp[x] = ScaledPixelClip((weight_t)(dstp[x] * (weight_t)center_weight + (left + dstp[x]) * (weight_t)outer_weight));
 }
 
-static __forceinline void af_horizontal_planar_process_line_uint16_c(uint16_t left, BYTE *dstp8, size_t row_size, int center_weight, int outer_weight, int bits_per_pixel) {
+static RGY_FORCEINLINE void af_horizontal_planar_process_line_uint16_c(uint16_t left, BYTE *dstp8, size_t row_size, int center_weight, int outer_weight, int bits_per_pixel) {
   size_t x;
   typedef uint16_t pixel_t;
   pixel_t* dstp = reinterpret_cast<pixel_t *>(dstp8);
   const int max_pixel_value = (1 << bits_per_pixel) - 1; // clamping on 10-12-14-16 bitdepth
-  typedef std::conditional < sizeof(pixel_t) == 1, int, __int64>::type weight_t; // for calling the right ScaledPixelClip()
+  typedef std::conditional < sizeof(pixel_t) == 1, int, int64_t>::type weight_t; // for calling the right ScaledPixelClip()
   size_t width = row_size / sizeof(pixel_t);
   for (x = 0; x < width-1; ++x) {
     pixel_t temp = (pixel_t)ScaledPixelClipEx((weight_t)(dstp[x] * (weight_t)center_weight + (left + dstp[x+1]) * (weight_t)outer_weight), max_pixel_value);
@@ -1075,7 +1106,7 @@ static void af_horizontal_planar_c(BYTE* dstp8, size_t height, size_t pitch8, si
     }
 }
 
-static __forceinline void af_horizontal_planar_process_line_float_c(float left, float *dstp, size_t row_size, float center_weight, float outer_weight) {
+static RGY_FORCEINLINE void af_horizontal_planar_process_line_float_c(float left, float *dstp, size_t row_size, float center_weight, float outer_weight) {
     size_t x;
     size_t width = row_size / sizeof(float);
     for (x = 0; x < width-1; ++x) {
@@ -1530,12 +1561,14 @@ AVSValue __cdecl Create_Blur(AVSValue args, void*, IScriptEnvironment* env)
 
 TemporalSoften::TemporalSoften( PClip _child, unsigned radius, unsigned luma_thresh,
                                 unsigned chroma_thresh, int _scenechange, IScriptEnvironment* env )
-  : GenericVideoFilter  (_child),
-    chroma_threshold    (min(chroma_thresh,255u)),
-    luma_threshold      (min(luma_thresh,255u)),
-    kernel              (2*min(radius,(unsigned int)MAX_RADIUS)+1),
-    scenechange (_scenechange)
-{
+  : GenericVideoFilter(_child),
+    planes(),
+    scenechange (_scenechange),
+    pixelsize(0),
+    bits_per_pixel(0),
+    luma_threshold(min(luma_thresh,255u)),
+    chroma_threshold(min(chroma_thresh,255u)),
+    kernel(2*min(radius,(unsigned int)MAX_RADIUS)+1) {
 
   child->SetCacheHints(CACHE_WINDOW,kernel);
 
@@ -1679,7 +1712,7 @@ static void accumulate_line_yuy2_c(BYTE* c_plane, const BYTE** planeP, int plane
   }
 }
 
-static __forceinline __m128i ts_multiply_repack_sse2(const __m128i &src, const __m128i &div, __m128i &halfdiv, __m128i &zero) {
+static RGY_FORCEINLINE __m128i ts_multiply_repack_sse2(const __m128i &src, const __m128i &div, __m128i &halfdiv, __m128i &zero) {
   __m128i acc = _mm_madd_epi16(src, div);
   acc = _mm_add_epi32(acc, halfdiv);
   acc = _mm_srli_epi32(acc, 15);
@@ -1697,9 +1730,11 @@ template<bool hasSSE4>
 static inline __m128i _mm_cmple_epu16(__m128i x, __m128i y)
 {
   // Returns 0xFFFF where x <= y:
+#if defined(__SSE4_1__) && !(defined(_WIN32) || defined(_WIN64))
   if(hasSSE4)
     return _mm_cmpeq_epi16(_mm_min_epu16(x, y), x);
   else
+#endif
     return _mm_cmpeq_epi16(_mm_subs_epu16(x, y), _mm_setzero_si128());
 }
 
@@ -1758,12 +1793,14 @@ static void accumulate_line_sse2(BYTE* c_plane, const BYTE** planeP, int planes,
     }
 
     __m128i acc;
+#if defined(__SSSE3__) && !(defined(_WIN32) || defined(_WIN64))
     if (hasSSSE3) {
       // SSSE3: _mm_mulhrs_epi16: r0 := INT16(((a0 * b0) + 0x4000) >> 15)
       low = _mm_mulhrs_epi16(low, div_vector);
       high = _mm_mulhrs_epi16(high, div_vector);
-    }
-    else {
+    } else
+#endif
+    {
       // (x*2 * 65536/N + 65536) / 65536 / 2
       // Hi16(x*2 * 65536/N + 1) >> 1
       low = _mm_mulhi_epu16(_mm_slli_epi16(low, 1), div_vector);
@@ -1846,15 +1883,9 @@ static void accumulate_line_16_sse2(BYTE* c_plane, const BYTE** planeP, int plan
     //__m128 half = _mm_set1_ps(0.5f); // no need rounder, _mm_cvtps_epi32 default is round-to-nearest, unless we use _mm_cvttps_epi32 which truncates
     low = _mm_cvtps_epi32(_mm_mul_ps(_mm_cvtepi32_ps(low), div_vector));
     high = _mm_cvtps_epi32(_mm_mul_ps(_mm_cvtepi32_ps(high), div_vector));
-    if (hasSSE4)
-      acc = _mm_packus_epi32(low, high); // sse4
-    else
-      acc = _MM_PACKUS_EPI32(low, high);
+    acc = af_mm_packus_epi32<hasSSE4>(low, high); // sse4
     if (lessThan16bit)
-      if(hasSSE4)
-        acc = _mm_min_epu16(acc, limit);
-      else
-        acc = _MM_MIN_EPU16(acc, limit);
+      acc = af_mm_min_epu16<hasSSE4>(acc, limit);
 
     _mm_store_si128(reinterpret_cast<__m128i*>(c_plane+x), acc);
   }
@@ -1862,7 +1893,7 @@ static void accumulate_line_16_sse2(BYTE* c_plane, const BYTE** planeP, int plan
 
 #ifdef X86_32
 
-static __forceinline __m64 ts_multiply_repack_mmx(const __m64 &src, const __m64 &div, __m64 &halfdiv, __m64 &zero) {
+static RGY_FORCEINLINE __m64 ts_multiply_repack_mmx(const __m64 &src, const __m64 &div, __m64 &halfdiv, __m64 &zero) {
   __m64 acc = _mm_madd_pi16(src, div);
   acc = _mm_add_pi32(acc, halfdiv);
   acc = _mm_srli_pi32(acc, 15);
@@ -2064,12 +2095,12 @@ template int calculate_sad_sse2<true>(const BYTE* cur_ptr, const BYTE* other_ptr
 // also used from conditionalfunctions
 // packed rgb template masks out alpha plane for RGB32/RGB64
 template<typename pixel_t, bool packedRGB3264>
-__int64 calculate_sad_8_or_16_sse2(const BYTE* cur_ptr, const BYTE* other_ptr, int cur_pitch, int other_pitch, size_t rowsize, size_t height)
+int64_t calculate_sad_8_or_16_sse2(const BYTE* cur_ptr, const BYTE* other_ptr, int cur_pitch, int other_pitch, size_t rowsize, size_t height)
 {
   size_t mod16_width = rowsize / 16 * 16;
 
   __m128i zero = _mm_setzero_si128();
-  __int64 totalsum = 0; // fullframe SAD exceeds int32 at 8+ bit
+  int64_t totalsum = 0; // fullframe SAD exceeds int32 at 8+ bit
 
   __m128i rgb_mask;
   if (packedRGB3264) {
@@ -2147,10 +2178,10 @@ __int64 calculate_sad_8_or_16_sse2(const BYTE* cur_ptr, const BYTE* other_ptr, i
 }
 
 // instantiate
-template __int64 calculate_sad_8_or_16_sse2<uint8_t, false>(const BYTE* cur_ptr, const BYTE* other_ptr, int cur_pitch, int other_pitch, size_t rowsize, size_t height);
-template __int64 calculate_sad_8_or_16_sse2<uint8_t, true>(const BYTE* cur_ptr, const BYTE* other_ptr, int cur_pitch, int other_pitch, size_t rowsize, size_t height);
-template __int64 calculate_sad_8_or_16_sse2<uint16_t, false>(const BYTE* cur_ptr, const BYTE* other_ptr, int cur_pitch, int other_pitch, size_t rowsize, size_t height);
-template __int64 calculate_sad_8_or_16_sse2<uint16_t, true>(const BYTE* cur_ptr, const BYTE* other_ptr, int cur_pitch, int other_pitch, size_t rowsize, size_t height);
+template int64_t calculate_sad_8_or_16_sse2<uint8_t, false>(const BYTE* cur_ptr, const BYTE* other_ptr, int cur_pitch, int other_pitch, size_t rowsize, size_t height);
+template int64_t calculate_sad_8_or_16_sse2<uint8_t, true>(const BYTE* cur_ptr, const BYTE* other_ptr, int cur_pitch, int other_pitch, size_t rowsize, size_t height);
+template int64_t calculate_sad_8_or_16_sse2<uint16_t, false>(const BYTE* cur_ptr, const BYTE* other_ptr, int cur_pitch, int other_pitch, size_t rowsize, size_t height);
+template int64_t calculate_sad_8_or_16_sse2<uint16_t, true>(const BYTE* cur_ptr, const BYTE* other_ptr, int cur_pitch, int other_pitch, size_t rowsize, size_t height);
 
 
 #ifdef X86_32
@@ -2182,7 +2213,7 @@ static int calculate_sad_isse(const BYTE* cur_ptr, const BYTE* other_ptr, int cu
 #endif
 
 template<typename pixel_t>
-static __int64 calculate_sad_c(const BYTE* cur_ptr, const BYTE* other_ptr, int cur_pitch, int other_pitch, size_t rowsize, size_t height)
+static int64_t calculate_sad_c(const BYTE* cur_ptr, const BYTE* other_ptr, int cur_pitch, int other_pitch, size_t rowsize, size_t height)
 {
   const pixel_t *ptr1 = reinterpret_cast<const pixel_t *>(cur_ptr);
   const pixel_t *ptr2 = reinterpret_cast<const pixel_t *>(other_ptr);
@@ -2191,7 +2222,7 @@ static __int64 calculate_sad_c(const BYTE* cur_ptr, const BYTE* other_ptr, int c
   other_pitch /= sizeof(pixel_t);
 
   // for fullframe float may loose precision
-  typedef typename std::conditional < std::is_floating_point<pixel_t>::value, double, __int64>::type sum_t;
+  typedef typename std::conditional < std::is_floating_point<pixel_t>::value, double, int64_t>::type sum_t;
   // for one row int is enough and faster than int64
   typedef typename std::conditional < std::is_floating_point<pixel_t>::value, float, int>::type sumrow_t;
   sum_t sum = 0;
@@ -2206,20 +2237,20 @@ static __int64 calculate_sad_c(const BYTE* cur_ptr, const BYTE* other_ptr, int c
     ptr2 += other_pitch;
   }
   if (std::is_floating_point<pixel_t>::value)
-    return (__int64)(sum * 255); // scale 0..1 based sum to 8 bit range
+    return (int64_t)(sum * 255); // scale 0..1 based sum to 8 bit range
   else
-    return (__int64)sum; // for int, scaling to 8 bit range is done outside
+    return (int64_t)sum; // for int, scaling to 8 bit range is done outside
 }
 
 // sum of byte-diffs.
-static __int64 calculate_sad(const BYTE* cur_ptr, const BYTE* other_ptr, int cur_pitch, int other_pitch, size_t rowsize, size_t height, int pixelsize, int bits_per_pixel, IScriptEnvironment* env) {
+static int64_t calculate_sad(const BYTE* cur_ptr, const BYTE* other_ptr, int cur_pitch, int other_pitch, size_t rowsize, size_t height, int pixelsize, int bits_per_pixel, IScriptEnvironment* env) {
   // todo: sse for float
   if ((pixelsize == 1) && (env->GetCPUFlags() & CPUF_SSE2) && IsPtrAligned(cur_ptr, 16) && IsPtrAligned(other_ptr, 16) && rowsize >= 16) {
-    return (__int64)calculate_sad_sse2<false>(cur_ptr, other_ptr, cur_pitch, other_pitch, rowsize, height);
+    return (int64_t)calculate_sad_sse2<false>(cur_ptr, other_ptr, cur_pitch, other_pitch, rowsize, height);
   }
 #ifdef X86_32
   if ((pixelsize ==1 ) && (env->GetCPUFlags() & CPUF_INTEGER_SSE) && rowsize >= 8) {
-    return (__int64)calculate_sad_isse(cur_ptr, other_ptr, cur_pitch, other_pitch, rowsize, height);
+    return (int64_t)calculate_sad_isse(cur_ptr, other_ptr, cur_pitch, other_pitch, rowsize, height);
   }
 #endif
   // sse2 uint16_t
@@ -2388,8 +2419,8 @@ AVSValue __cdecl TemporalSoften::Create(AVSValue args, void*, IScriptEnvironment
 
 SpatialSoften::SpatialSoften( PClip _child, int _radius, unsigned _luma_threshold,
                               unsigned _chroma_threshold, IScriptEnvironment* env )
-  : GenericVideoFilter(_child), diameter(_radius*2+1),
-    luma_threshold(_luma_threshold), chroma_threshold(_chroma_threshold)
+  : GenericVideoFilter(_child),
+    luma_threshold(_luma_threshold), chroma_threshold(_chroma_threshold), diameter(_radius*2+1)
 {
   if (!vi.IsYUY2())
     env->ThrowError("SpatialSoften: requires YUY2 input");

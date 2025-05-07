@@ -63,8 +63,8 @@
 #endif
 
 #if   defined(GCC)
-#   undef __forceinline
-#   define __forceinline inline
+#   undef RGY_FORCEINLINE
+#   define RGY_FORCEINLINE inline
 #endif
 
 #endif //AVS_CONFIG_H

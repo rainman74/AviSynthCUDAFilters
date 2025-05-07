@@ -7,6 +7,7 @@
 #include "avs/alignment.h"
 #include "focus.h"
 
+#include <emmintrin.h>
 #include "CommonFunctions.h"
 #include "VectorFunctions.cuh"
 #include "ReduceKernel.cuh"
@@ -75,7 +76,7 @@ double calc_sum_of_pixels(const void* src, int width, int height, int pitch, int
 // Average plane
 template<typename pixel_t>
 static double get_sum_of_pixels_c(const BYTE* srcp8, size_t height, size_t width, size_t pitch) {
-  typedef typename std::conditional < sizeof(pixel_t) == 4, double, __int64>::type sum_t;
+  typedef typename std::conditional < sizeof(pixel_t) == 4, double, int64_t>::type sum_t;
   sum_t accum = 0; // int32 holds sum of maximum 16 Mpixels for 8 bit, and 65536 pixels for uint16_t pixels
   const pixel_t *srcp = reinterpret_cast<const pixel_t *>(srcp8);
   pitch /= sizeof(pixel_t);
@@ -91,7 +92,7 @@ static double get_sum_of_pixels_c(const BYTE* srcp8, size_t height, size_t width
 // sum: sad with zero
 static double get_sum_of_pixels_sse2(const BYTE* srcp, size_t height, size_t width, size_t pitch) {
   size_t mod16_width = width / 16 * 16;
-  __int64 result = 0;
+  int64_t result = 0;
   __m128i sum = _mm_setzero_si128();
   __m128i zero = _mm_setzero_si128();
 
@@ -117,7 +118,7 @@ static double get_sum_of_pixels_sse2(const BYTE* srcp, size_t height, size_t wid
 #ifdef X86_32
 static double get_sum_of_pixels_isse(const BYTE* srcp, size_t height, size_t width, size_t pitch) {
   size_t mod8_width = width / 8 * 8;
-  __int64 result = 0;
+  int64_t result = 0;
   __m64 sum = _mm_setzero_si64();
   __m64 zero = _mm_setzero_si64();
 
@@ -195,7 +196,7 @@ public:
       if (pixelsize == 4)
         sum_in_32bits = false;
       else // worst case
-        sum_in_32bits = ((__int64)total_pixels * (__int64(1) << bits_per_pixel)) <= std::numeric_limits<int>::max();
+        sum_in_32bits = ((int64_t)total_pixels * (int64_t(1) << bits_per_pixel)) <= std::numeric_limits<int>::max();
 
       VideoInfo workvi = VideoInfo();
       workvi.pixel_type = VideoInfo::CS_BGR32;
@@ -211,12 +212,12 @@ public:
         if (sum_in_32bits)
           return calc_sum_of_pixels<uchar4, uint32_t, uint32_t>(srcp, width, height, pitch, maxv, workbuf, env);
         else
-          return calc_sum_of_pixels<uchar4, uint64_t, int>(srcp, width, height, pitch, maxv, workbuf, env);
+          return calc_sum_of_pixels<uchar4, unsigned long long, int>(srcp, width, height, pitch, maxv, workbuf, env);
       case 2:
         if (sum_in_32bits)
           return calc_sum_of_pixels<ushort4, uint32_t, uint32_t>(srcp, width, height, pitch, maxv, workbuf, env);
         else
-          return calc_sum_of_pixels<ushort4, uint64_t, uint32_t>(srcp, width, height, pitch, maxv, workbuf, env);
+          return calc_sum_of_pixels<ushort4, unsigned long long, uint32_t>(srcp, width, height, pitch, maxv, workbuf, env);
       case 4:
         return calc_sum_of_pixels<float4, float, float>(srcp, width, height, pitch, maxv, workbuf, env);
       }
@@ -232,7 +233,7 @@ public:
       if (pixelsize == 4)
         sum_in_32bits = false;
       else // worst case
-        sum_in_32bits = ((__int64)total_pixels * (pixelsize == 1 ? 255 : 65535)) <= std::numeric_limits<int>::max();
+        sum_in_32bits = ((int64_t)total_pixels * (pixelsize == 1 ? 255 : 65535)) <= std::numeric_limits<int>::max();
 
       if ((pixelsize == 1) && sum_in_32bits && (env->GetCPUFlags() & CPUF_SSE2) && IsPtrAligned(srcp, 16) && width >= 16) {
         sum = get_sum_of_pixels_sse2(srcp, height, width, pitch);
@@ -333,7 +334,7 @@ static double get_sad_c(const BYTE* c_plane8, const BYTE* t_plane8, size_t heigh
   const pixel_t *t_plane = reinterpret_cast<const pixel_t *>(t_plane8);
   c_pitch /= sizeof(pixel_t);
   t_pitch /= sizeof(pixel_t);
-  typedef typename std::conditional < sizeof(pixel_t) == 4, double, __int64>::type sum_t;
+  typedef typename std::conditional < sizeof(pixel_t) == 4, double, int64_t>::type sum_t;
   sum_t accum = 0; // int32 holds sum of maximum 16 Mpixels for 8 bit, and 65536 pixels for uint16_t pixels
 
   for (size_t y = 0; y < height; y++) {
@@ -353,7 +354,7 @@ static double get_sad_rgb_c(const BYTE* c_plane8, const BYTE* t_plane8, size_t h
   const pixel_t *t_plane = reinterpret_cast<const pixel_t *>(t_plane8);
   c_pitch /= sizeof(pixel_t);
   t_pitch /= sizeof(pixel_t);
-  __int64 accum = 0; // packed rgb: integer type only
+  int64_t accum = 0; // packed rgb: integer type only
   for (size_t y = 0; y < height; y++) {
     for (size_t x = 0; x < width; x += 4) {
       accum += std::abs(t_plane[x] - c_plane[x]);
@@ -506,7 +507,7 @@ public:
       if (pixelsize == 4)
         sum_in_32bits = false;
       else // worst case check
-        sum_in_32bits = ((__int64)total_pixels * ((__int64(1) << bits_per_pixel) - 1)) <= std::numeric_limits<int>::max();
+        sum_in_32bits = ((int64_t)total_pixels * ((int64_t(1) << bits_per_pixel) - 1)) <= std::numeric_limits<int>::max();
 
       VideoInfo workvi = VideoInfo();
       workvi.pixel_type = VideoInfo::CS_BGR32;
@@ -523,12 +524,12 @@ public:
         if (sum_in_32bits)
           return calc_sad<uchar4, uint32_t, uint32_t>(srcp, srcp2, width, height, pitch, maxv, workbuf, is_rgb, env);
         else
-          return calc_sad<uchar4, uint64_t, uint32_t>(srcp, srcp2, width, height, pitch, maxv, workbuf, is_rgb, env);
+          return calc_sad<uchar4, unsigned long long, uint32_t>(srcp, srcp2, width, height, pitch, maxv, workbuf, is_rgb, env);
       case 2:
         if (sum_in_32bits)
           return calc_sad<ushort4, uint32_t, uint32_t>(srcp, srcp2, width, height, pitch, maxv, workbuf, is_rgb, env);
         else
-          return calc_sad<ushort4, uint64_t, uint32_t>(srcp, srcp2, width, height, pitch, maxv, workbuf, is_rgb, env);
+          return calc_sad<ushort4, unsigned long long, uint32_t>(srcp, srcp2, width, height, pitch, maxv, workbuf, is_rgb, env);
       case 4:
         return calc_sad<float4, float, float>(srcp, srcp2, width, height, pitch, maxv, workbuf, is_rgb, env);
       }
@@ -545,7 +546,7 @@ public:
       if (pixelsize == 4)
         sum_in_32bits = false;
       else // worst case check
-        sum_in_32bits = ((__int64)total_pixels * ((1 << bits_per_pixel) - 1)) <= std::numeric_limits<int>::max();
+        sum_in_32bits = ((int64_t)total_pixels * ((1 << bits_per_pixel) - 1)) <= std::numeric_limits<int>::max();
 
       double sad = 0.0;
 
@@ -668,7 +669,7 @@ public:
       if (pixelsize == 4)
         sum_in_32bits = false;
       else // worst case check
-        sum_in_32bits = ((__int64)total_pixels * ((__int64(1) << bits_per_pixel) - 1)) <= std::numeric_limits<int>::max();
+        sum_in_32bits = ((int64_t)total_pixels * ((int64_t(1) << bits_per_pixel) - 1)) <= std::numeric_limits<int>::max();
 
       VideoInfo workvi = VideoInfo();
       workvi.pixel_type = VideoInfo::CS_BGR32;
@@ -685,12 +686,12 @@ public:
         if (sum_in_32bits)
           return calc_sad<uchar4, uint32_t, uint32_t>(srcp, srcp2, width, height, pitch, maxv, workbuf, is_rgb, env);
         else
-          return calc_sad<uchar4, uint64_t, uint32_t>(srcp, srcp2, width, height, pitch, maxv, workbuf, is_rgb, env);
+          return calc_sad<uchar4, unsigned long long, uint32_t>(srcp, srcp2, width, height, pitch, maxv, workbuf, is_rgb, env);
       case 2:
         if (sum_in_32bits)
           return calc_sad<ushort4, uint32_t, uint32_t>(srcp, srcp2, width, height, pitch, maxv, workbuf, is_rgb, env);
         else
-          return calc_sad<ushort4, uint64_t, uint32_t>(srcp, srcp2, width, height, pitch, maxv, workbuf, is_rgb, env);
+          return calc_sad<ushort4, unsigned long long, uint32_t>(srcp, srcp2, width, height, pitch, maxv, workbuf, is_rgb, env);
       case 4:
         return calc_sad<float4, float, float>(srcp, srcp2, width, height, pitch, maxv, workbuf, is_rgb, env);
       }
@@ -707,7 +708,7 @@ public:
       if (pixelsize == 4)
         sum_in_32bits = false;
       else // worst case check
-        sum_in_32bits = ((__int64)total_pixels * ((1 << bits_per_pixel) - 1)) <= std::numeric_limits<int>::max();
+        sum_in_32bits = ((int64_t)total_pixels * ((1 << bits_per_pixel) - 1)) <= std::numeric_limits<int>::max();
 
       double sad = 0;
       // for c: width, for sse: rowsize

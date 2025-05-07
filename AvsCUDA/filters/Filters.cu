@@ -2,9 +2,11 @@
 #include "avs/alignment.h"
 
 #include "../AvsCUDA.h"
+#include "KUtil.h"
 
 #include <stdint.h>
 #include <algorithm>
+#include <emmintrin.h>
 #include "CommonFunctions.h"
 #include "VectorFunctions.cuh"
 #include "ReduceKernel.cuh"
@@ -353,7 +355,7 @@ private:
   bool doB, doG, doR, doA;
   bool doY, doU, doV;
 
-  unsigned __int64 mask64;
+  uint64_t mask64;
   int pixelsize;
   int bits_per_pixel; // 8,10..16
 };

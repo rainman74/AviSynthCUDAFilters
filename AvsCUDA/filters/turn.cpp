@@ -95,7 +95,7 @@ void turn_left_plane_8_c(const BYTE* srcp, BYTE* dstp, int src_rowsize, int src_
 }
 
 
-static __forceinline __m128i movehl(const __m128i& x)
+static RGY_FORCEINLINE __m128i movehl(const __m128i& x)
 {
     __m128 ps = _mm_castsi128_ps(x);
     return _mm_castps_si128(_mm_movehl_ps(ps, ps));
@@ -103,7 +103,7 @@ static __forceinline __m128i movehl(const __m128i& x)
 
 
 // This pattern seems faster than the others.
-static __forceinline void transpose_8x8x8_sse2(const BYTE* srcp, BYTE* dstp, int src_pitch, int dst_pitch)
+static RGY_FORCEINLINE void transpose_8x8x8_sse2(const BYTE* srcp, BYTE* dstp, int src_pitch, int dst_pitch)
 {
     __m128i a07 = _mm_loadl_epi64(reinterpret_cast<const __m128i*>(srcp + src_pitch * 0)); //a0 a1 a2 a3 a4 a5 a6 a7
     __m128i b07 = _mm_loadl_epi64(reinterpret_cast<const __m128i*>(srcp + src_pitch * 1)); //b0 b1 b2 b3 b4 b5 b6 b7
@@ -187,7 +187,7 @@ void turn_left_plane_16_c(const BYTE* srcp, BYTE* dstp, int src_rowsize, int src
 }
 
 
-static __forceinline void transpose_16x4x8_sse2(const BYTE* srcp, BYTE* dstp, const int src_pitch, const int dst_pitch)
+static RGY_FORCEINLINE void transpose_16x4x8_sse2(const BYTE* srcp, BYTE* dstp, const int src_pitch, const int dst_pitch)
 {
     __m128i a03 = _mm_loadl_epi64(reinterpret_cast<const __m128i*>(srcp + src_pitch * 0)); //a0 a1 a2 a3
     __m128i b03 = _mm_loadl_epi64(reinterpret_cast<const __m128i*>(srcp + src_pitch * 1)); //b0 b1 b2 b3
@@ -266,7 +266,7 @@ void turn_left_plane_32_c(const BYTE* srcp, BYTE* dstp, int src_rowsize, int src
 }
 
 
-static __forceinline void transpose_32x4x4_sse2(const BYTE* srcp, BYTE* dstp, const int src_pitch, const int dst_pitch)
+static RGY_FORCEINLINE void transpose_32x4x4_sse2(const BYTE* srcp, BYTE* dstp, const int src_pitch, const int dst_pitch)
 {
     __m128i a03 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(srcp + src_pitch * 0)); //a0 a1 a2 a3
     __m128i b03 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(srcp + src_pitch * 1)); //b0 b1 b2 b3
@@ -529,7 +529,10 @@ static void turn_180_plane_xsse(const BYTE* srcp, BYTE* dstp, int src_rowsize, i
             {
                 src = _mm_shuffle_epi32(src, _MM_SHUFFLE(0, 1, 2, 3));
             }
-            else if constexpr(INSTRUCTION_SET == CPUF_SSE2)
+            else
+#if defined(__SSSE3__) && !(defined(_WIN32) || defined(_WIN64))
+            if constexpr(INSTRUCTION_SET == CPUF_SSE2)
+#endif
             {
                 src = _mm_shuffle_epi32(src, sizeof(T) == 1 ? _MM_SHUFFLE(0, 1, 2, 3) : _MM_SHUFFLE(1, 0, 3, 2));
                 src = _mm_shufflelo_epi16(src, sizeof(T) == 1 ? _MM_SHUFFLE(2, 3, 0, 1) : _MM_SHUFFLE(0, 1, 2, 3));
@@ -540,10 +543,12 @@ static void turn_180_plane_xsse(const BYTE* srcp, BYTE* dstp, int src_rowsize, i
                     src = _mm_or_si128(_mm_srli_epi16(src, 8), _mm_slli_epi16(src, 8));
                 }
             }
+#if defined(__SSSE3__) && !(defined(_WIN32) || defined(_WIN64))
             else // SSSE3
             {
                 src = _mm_shuffle_epi8(src, pshufb_mask);
             }
+#endif
             _mm_storeu_si128(reinterpret_cast<__m128i*>(d0 - x), src);
         }
         s0 += src_pitch;

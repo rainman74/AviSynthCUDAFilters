@@ -127,8 +127,6 @@ static __device__ __host__ int4 CalcCombe(int4 a, int4 b, int4 c, int4 d, int4 e
   return abs(a + c * 4 + e - (b + d) * 3);
 }
 
-int scaleParam(float thresh, int pixelBits);
-
 int Get8BitType(const VideoInfo& vi);
 int Get16BitType(const VideoInfo& vi);
 int GetYType(const VideoInfo& vi);

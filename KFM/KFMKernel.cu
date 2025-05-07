@@ -15,6 +15,8 @@
 #include "VectorFunctions.cuh"
 #include "ReduceKernel.cuh"
 #include "KFMFilterBase.cuh"
+#include "KUtil.h"
+#include "rgy_filesystem.h"
 
 class KPatchCombe : public KFMFilterBase
 {
@@ -299,11 +301,21 @@ class KFMSwitch : public KFMFilterBase
         // ここでは60fpsに決定してるので、
         // 次のGetFrameでこのフレームが必要なことは決定している
         baseFrame = ucfclip->GetFrame(n60, env);
+#if AVISYNTH_MODE == AVISYNTH_NEO
         auto prop = baseFrame.GetProperty(DECOMB_UCF_FLAG_STR);
         if (prop == nullptr) {
           env->ThrowError("Invalid UCF clip");
         }
         auto flag = (DECOMB_UCF_FLAG)prop->GetInt();
+#elif AVISYNTH_MODE == AVISYNTH_PLUS
+        int error;
+        int flag = (int)env->propGetInt(env->getFramePropsRO(baseFrame.frame), DECOMB_UCF_FLAG_STR, 0, &error);
+        if (error) {
+          env->ThrowError("Invalid UCF clip");
+        }
+#else
+        static_assert(false, "Invalid AVISYNTH_MODE");
+#endif
         // フレーム置換がされた場合は、60p部分マージ処理を実行する
         if (flag != DECOMB_UCF_NEXT && flag != DECOMB_UCF_PREV) {
           return info;
@@ -494,8 +506,15 @@ class KFMSwitch : public KFMFilterBase
     Frame dst;
     if (mode != ONLY_FRAME_DURATION) {
       dst = InternalGetFrame<pixel_t>(n60, info, env);
-
+#if AVISYNTH_MODE == AVISYNTH_NEO
       if (dst.GetProperty("KFM_SourceStart") == nullptr) {
+#elif AVISYNTH_MODE == AVISYNTH_PLUS
+      int error;
+      env->propGetInt(env->getFramePropsRO(dst.frame), "KFM_SourceStart", 0, &error); // check existance only
+      if(error) {
+#else
+        static_assert(false, "Invalid AVISYNTH_MODE");
+#endif
         // プロパティがない場合はここで追加する
         int start, end;
         switch (info.baseType) {
@@ -512,9 +531,17 @@ class KFMSwitch : public KFMFilterBase
           end = cycleStart + (frameInfo.fieldStartIndex + frameInfo.numFields + 1) / 2;
           break;
         }
+#if AVISYNTH_MODE == AVISYNTH_NEO
         env->MakePropertyWritable(&dst.frame);
         dst.SetProperty("KFM_SourceStart", start);
         dst.SetProperty("KFM_NumSourceFrames", end - start);
+#elif AVISYNTH_MODE == AVISYNTH_PLUS
+        auto avsmap = env->getFramePropsRW(dst.frame);
+        env->propSetInt(avsmap, "KFM_SourceStart", start, AVSPropAppendMode::PROPAPPENDMODE_REPLACE);
+        env->propSetInt(avsmap, "KFM_NumSourceFrames", end - start, AVSPropAppendMode::PROPAPPENDMODE_REPLACE);
+#else
+        static_assert(false, "Invalid AVISYNTH_MODE");
+#endif
       }
     }
     else {
@@ -573,7 +600,7 @@ public:
     , showflag(showflag)
     , logUVx(vi.GetPlaneWidthSubsampling(PLANAR_U))
     , logUVy(vi.GetPlaneHeightSubsampling(PLANAR_U))
-		, filepath(GetFullPath(filepath)) // GetFrame時とカレントディレクトリが違うのでフルパスにしておく
+		, filepath(GetFullPathFrom(filepath.c_str())) // GetFrame時とカレントディレクトリが違うのでフルパスにしておく
 		, current(0)
 		, complete(false)
   {

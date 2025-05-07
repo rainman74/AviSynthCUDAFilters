@@ -35,9 +35,8 @@
 
 #include "../AvsCUDA.h"
 #include <avs/alignment.h>
-#include <avs/win.h>
-#include <emmintrin.h>
-#include <immintrin.h>
+#include "rgy_osdep.h"
+#include <smmintrin.h>
 #include <tuple>
 #include <map>
 
@@ -45,6 +44,35 @@
 #include "convert_avx2.h"
 
 #include "Copy.h"
+
+
+RGY_TARGET("sse4.1")
+static RGY_FORCEINLINE __m128i af_mm_min_epu16_sse41(__m128i a, __m128i b) {
+	return _mm_min_epu16(a, b);
+}
+
+template<bool useSSE41>
+static RGY_FORCEINLINE __m128i af_mm_min_epu16(__m128i a, __m128i b) {
+	if constexpr(useSSE41) {
+		return af_mm_min_epu16_sse41(a, b);
+	} else {
+		return _MM_MIN_EPU16(a, b);
+	}
+}
+
+RGY_TARGET("sse4.1")
+static RGY_FORCEINLINE __m128i af_mm_packus_epi32_sse41(__m128i a, __m128i b) {
+	return _mm_packus_epi32(a, b);
+}
+
+template<bool useSSE41>
+static RGY_FORCEINLINE __m128i af_mm_packus_epi32(__m128i a, __m128i b) {
+	if constexpr(useSSE41) {
+		return af_mm_packus_epi32_sse41(a, b);
+	} else {
+		return _MM_PACKUS_EPI32(a, b);
+	}
+}
 
 //--------------- planar bit depth conversions
 // todo: separate file?
@@ -714,7 +742,7 @@ static void convert_rgb_uint16_to_8_sse2(const BYTE *srcp, BYTE *dstp, int src_r
 #define FS_OPTIMIZED_SERPENTINE_COEF
 
 template<int direction>
-static __forceinline void diffuse_floyd(int err, int &nextError, int *error_ptr)
+static RGY_FORCEINLINE void diffuse_floyd(int err, int &nextError, int *error_ptr)
 {
 #if defined (FS_OPTIMIZED_SERPENTINE_COEF)
 	const int      e1 = 0;
@@ -1134,14 +1162,14 @@ void convert_32_to_uintN_sse(const BYTE *srcp8, BYTE *dstp8, int src_rowsize, in
 			result_0 = _mm_cvttps_epi32(src_0); // truncate
 			result_1 = _mm_cvttps_epi32(src_1);
       if constexpr(sizeof(pixel_t) == 2) {
-				result = _mm_packus_epi32(result_0, result_1); // sse41
+				result = af_mm_packus_epi32<true>(result_0, result_1); // sse41
         if constexpr(targetbits > 8 && targetbits < 16) {
-					result = _mm_min_epu16(result, max_pixel_value_128); // sse41, extra clamp for 10, 12, 14 bits
+					result = af_mm_min_epu16<true>(result, max_pixel_value_128); // sse41, extra clamp for 10, 12, 14 bits
 				}
 				_mm_store_si128(reinterpret_cast<__m128i *>(dstp + x), result);
 			}
 			else {
-				result = _mm_packus_epi32(result_0, result_1);
+				result = af_mm_packus_epi32<sizeof(pixel_t) == 2>(result_0, result_1);
 				result = _mm_packus_epi16(result, result); // lo 8 byte
 				_mm_storel_epi64(reinterpret_cast<__m128i *>(dstp + x), result);
 			}
@@ -1250,7 +1278,7 @@ static inline __m128i Div_4xint32_by_255(const __m128i &esi, const __m128i &magi
 	// simd implementation of
 	/*
 	Trick of integer/255 w/o division:
-	tmp = (int)((( (__int64)esi * (-2139062143)) >> 32) & 0xFFFFFFFF) + esi) >> 7
+	tmp = (int)((( (int64_t)esi * (-2139062143)) >> 32) & 0xFFFFFFFF) + esi) >> 7
 	result = tmp + (tmp >> 31)
 
 	movzx	eax, BYTE PTR [ecx+edi] // orig pixel
@@ -1499,16 +1527,9 @@ static void convert_rgb_uint16_to_uint16_sse2(const BYTE *srcp8, BYTE *dstp8, in
 			__m128 result_lo = _mm_mul_ps(_mm_cvtepi32_ps(src_lo), factor);
 			__m128 result_hi = _mm_mul_ps(_mm_cvtepi32_ps(src_hi), factor);
 
-			__m128i result;
-			if (hasSSE4)
-				result = _mm_packus_epi32(_mm_cvtps_epi32(result_lo), _mm_cvtps_epi32(result_hi));
-			else
-				result = _MM_PACKUS_EPI32(_mm_cvtps_epi32(result_lo), _mm_cvtps_epi32(result_hi));
-      if constexpr(targetbits < 16) {
-				if (hasSSE4)
-					result = _mm_min_epu16(result, max_pixel_value);
-				else
-					result = _MM_MIN_EPU16(result, max_pixel_value);
+			__m128i result = af_mm_packus_epi32<hasSSE4>(_mm_cvtps_epi32(result_lo), _mm_cvtps_epi32(result_hi));
+			if constexpr(targetbits < 16) {
+				result = af_mm_min_epu16<hasSSE4>(result, max_pixel_value);
 			}
 			_mm_store_si128(reinterpret_cast<__m128i*>(dstp + x), result);
 		}

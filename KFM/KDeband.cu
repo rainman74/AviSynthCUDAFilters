@@ -1,4 +1,3 @@
-
 #include <stdint.h>
 #include <avisynth.h>
 
@@ -453,14 +452,14 @@ class KDeband : public KDebandBase
     int length = width * height * max_per_pixel;
     auto rand_buf = std::unique_ptr<uint8_t[]>(new uint8_t[length]);
 
-    XorShift xor (seed);
+    XorShift rng (seed);
 
     int i = 0;
     for (; i <= length - 4; i += 4) {
-      *(uint32_t*)(&rand_buf[i]) = xor.next();
+      *(uint32_t*)(&rand_buf[i]) = rng.next();
     }
     if (i < length) {
-      auto r = xor.next();
+      auto r = rng.next();
       memcpy(&rand_buf[i], &r, length - i);
     }
 

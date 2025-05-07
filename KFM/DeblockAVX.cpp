@@ -1,4 +1,5 @@
 
+#include "rgy_osdep.h"
 #include <stdint.h>
 #include <avisynth.h>
 
@@ -271,7 +272,7 @@ inline void add_block_avx(uint16_t* dst, int dst_pitch, float half_, int shift, 
   add_to_block_avx(&dst[dst_pitch * 7], row7, half, shift, maxv);
 }
 
-__forceinline void cpu_deblock_kernel_avx(uint16_t* dst, int dst_pitch, float thresh, float half, int shift, int maxv,
+RGY_FORCEINLINE void cpu_deblock_kernel_avx(uint16_t* dst, int dst_pitch, float thresh, float half, int shift, int maxv,
   __m256 &row0, __m256 &row1, __m256 &row2, __m256 &row3, __m256 &row4, __m256 &row5, __m256 &row6, __m256 &row7)
 {
   if (thresh <= 0) {
@@ -393,8 +394,10 @@ void cpu_store_slice_avx_tmpl(
     }
     if (x < width) {
       auto t = make_store_value_avx<shift>(&tmp[x + y * tmp_pitch], y, maxv);
+      uint16_t tmp[16];
+      _mm256_storeu_si256((__m256i*)tmp, t);
       for (int i = 0; x < width; ++x, ++i) {
-        dst[x + y * dst_pitch] = (pixel_t)t.m256i_u16[i];
+        dst[x + y * dst_pitch] = (pixel_t)tmp[i];
       }
     }
   }

@@ -7,6 +7,7 @@
 #include <memory>
 #include <vector>
 #include <deque>
+#include <cmath>
 
 #include "CommonFunctions.h"
 #include "TextOut.h"
@@ -14,6 +15,8 @@
 #include "KMV.h"
 #include "KFM.h"
 #include "Copy.h"
+#include "KUtil.h"
+#include "rgy_filesystem.h"
 
 void OnCudaError(cudaError_t err) {
 #if 1 // デバッグ用（本番は取り除く）
@@ -44,7 +47,11 @@ class File
 {
 public:
   File(const std::string& path, const char* mode, IScriptEnvironment* env) {
+#if defined(_WIN32) || defined(_WIN64)
     fp_ = _fsopen(path.c_str(), mode, _SH_DENYNO);
+#else
+    fp_ = fopen(path.c_str(), mode);
+#endif
     if (fp_ == NULL) {
       env->ThrowError("failed to open file %s", path.c_str());
     }
@@ -79,7 +86,11 @@ public:
     return v;
   }
   static bool exists(const std::string& path) {
+#if defined(_WIN32) || defined(_WIN64)
     FILE* fp_ = _fsopen(path.c_str(), "rb", _SH_DENYNO);
+#else
+    FILE* fp_ = fopen(path.c_str(), "rb");
+#endif
     if (fp_) {
       fclose(fp_);
       return true;
@@ -239,7 +250,7 @@ float RSplitCost(const PulldownPatternField* pattern, const float* fv, const flo
         // 相対的にfvを重視したいので、fvcostはlogで抑える
         //「全切り替えポイントでfvが小さい」->大（ただし動きが全く無ければ小）
         //「ある切り替えポイントでのみノイズが発生」->小 にしたい
-        sumcost += (costth - fv[i]) * log2f(fvcost[i] + 1.0f);
+        sumcost += (costth - fv[i]) * std::log2f(fvcost[i] + 1.0f);
       }
     }
   }
@@ -573,7 +584,7 @@ class KFMCycleAnalyze : public GenericVideoFilter
 
   PVideoFrame ExecuteOnePath(int cycle, IScriptEnvironment* env)
   {
-    if (cycle < results.size()) {
+    if (cycle < (int)results.size()) {
       return MakeFrame(results[cycle], env);
     }
 
@@ -623,7 +634,7 @@ class KFMCycleAnalyze : public GenericVideoFilter
         fprintf(debugFile->fp, "\n");
       }
 
-      if (recentBest.size() > pastCycles) {
+      if ((int)recentBest.size() > pastCycles) {
         recentBest.pop_back();
       }
     }
@@ -675,7 +686,7 @@ public:
     , th60(th60)
     , th24(th24)
     , rel24(rel24)
-    , filepath(GetFullPath(filepath)) // GetFrame時とカレントディレクトリが違うのでフルパスにしておく
+    , filepath(GetFullPathFrom(filepath.c_str())) // GetFrame時とカレントディレクトリが違うのでフルパスにしておく
     , debug(debug)
     , pattern(0)
     , current(0)
@@ -700,7 +711,7 @@ public:
       for (int i = 0; i < numCycles; ++i) {
         results.push_back(file.readValue<KFMResult>(env));
       }
-      if (results.size() != numCycles) {
+      if ((int)results.size() != numCycles) {
         env->ThrowError("[KFMCycleAnalyze] # of cycles does not match. please generate again.");
       }
     }
@@ -880,8 +891,7 @@ void AddFuncFM(IScriptEnvironment* env)
   env->AddFunction("KFMDumpFM", "c[filepath]s", KFMDumpFM::Create, 0);
 }
 
-#define NOMINMAX
-#include <Windows.h>
+#include "rgy_osdep.h"
 
 void AddFuncFMKernel(IScriptEnvironment* env);
 void AddFuncMergeStatic(IScriptEnvironment* env);
@@ -915,17 +925,4 @@ extern "C" __declspec(dllexport) const char* __stdcall AvisynthPluginInit3(IScri
   AddFuncDeblock(env);
 
   return "K Field Matching Plugin";
-}
-
-#define NOMINMAX
-#include <Windows.h>
-
-std::string GetFullPath(const std::string& path)
-{
-  char buf[MAX_PATH];
-  int sz = GetFullPathNameA(path.c_str(), sizeof(buf), buf, nullptr);
-  if (sz == 0 || sz >= sizeof(buf)) {
-    return path;
-  }
-  return buf;
 }

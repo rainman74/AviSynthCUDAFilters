@@ -1,7 +1,6 @@
 #pragma once
 #include "avisynth.h"
-#define NOMINMAX
-#include <windows.h>
+#include "rgy_osdep.h"
 
 #include "CommonFunctions.h"
 #include "Misc.h"

@@ -34,7 +34,7 @@
 
 
 #include <avs/alignment.h>
-#include <avs/win.h>
+#include "rgy_osdep.h"
 #include <emmintrin.h>
 #include <immintrin.h>
 

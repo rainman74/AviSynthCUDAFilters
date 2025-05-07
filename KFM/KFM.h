@@ -217,7 +217,11 @@ class TextFile
 public:
 	FILE* fp;
 	TextFile(const std::string& fname, const char* mode, IScriptEnvironment* env)
+#if defined(_WIN32) || defined(_WIN64)
 		: fp(_fsopen(fname.c_str(), mode, _SH_DENYNO))
+#else
+		: fp(fopen(fname.c_str(), mode))
+#endif
 	{
 		if (fp == nullptr) {
 			env->ThrowError("Failed to open file ... %s", fname.c_str());
@@ -230,4 +234,3 @@ public:
 
 int GetDeviceTypes(const PClip& clip);
 bool IsAligned(Frame& frame, const VideoInfo& vi, PNeoEnv env);
-std::string GetFullPath(const std::string& path);

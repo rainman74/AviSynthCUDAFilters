@@ -1,19 +1,20 @@
-#define _CRT_SECURE_NO_WARNINGS
+ï»¿#define _CRT_SECURE_NO_WARNINGS
 #include "avisynth.h"
 
-#define NOMINMAX
-#include <windows.h>
+#include "rgy_osdep.h"
 #include <cstdint>
 #include <memory>
 #include <vector>
 #include <algorithm>
 #include <cassert>
+#include <cmath>
 
 #include "CommonFunctions.h"
 #include "MVKernel.h"
 #include "DeviceLocalData.h"
 #include "Misc.h"
 #include "KMV.h"
+#include "KUtil.h"
 
 #if 1
 #include "DebugWriter.h"
@@ -398,20 +399,16 @@ public:
   template <int NPELL2>
   const pixel_t *GetAbsolutePointerPel(int nX, int nY) const
   {
-    enum { MASK = (1 << NPELL2) - 1 };
+    int idx = 0;
+    if (NPELL2 > 0) {
+      enum { MASK = (1 << NPELL2) - 1 };
 
-    int idx = (nX & MASK) | ((nY & MASK) << NPELL2);
+      idx = (nX & MASK) | ((nY & MASK) << NPELL2);
 
-    nX >>= NPELL2;
-    nY >>= NPELL2;
-
+      nX >>= NPELL2;
+      nY >>= NPELL2;
+    }
     return pPlane[idx] + nX + nY * nPitch;
-  }
-
-  template <>
-  const pixel_t *GetAbsolutePointerPel <0>(int nX, int nY) const
-  {
-    return pPlane[0] + nX + nY * nPitch;
   }
 
   const pixel_t *GetAbsolutePointer(int nX, int nY) const
@@ -442,7 +439,7 @@ public:
 
   //void SetInterp(int nRfilter, int nSharp)
   //{
-  //  // ¡‚Í–¢‘Î‰
+  //  // ä»Šã¯æœªå¯¾å¿œ
   //}
 
   void SetTarget(uint8_t* _pSrc, int _nPitch)
@@ -501,7 +498,7 @@ public:
         kernel->VerticalWiener(pPlane[2], pPlane[0], nPitch, nPitch, nExtendedWidth, nExtendedHeight, nBitsPerPixel, stream_);
         kernel->HorizontalWiener(pPlane[3], pPlane[2], nPitch, nPitch, nExtendedWidth, nExtendedHeight, nBitsPerPixel, stream_);
         break;
-        //case 4: // ¡‚Í–¢‘Î‰
+        //case 4: // ä»Šã¯æœªå¯¾å¿œ
         //  break;
       }
     }
@@ -513,7 +510,7 @@ public:
         VerticalWiener(pPlane[2], pPlane[0], nPitch, nPitch, nExtendedWidth, nExtendedHeight, nBitsPerPixel);
         HorizontalWiener(pPlane[3], pPlane[2], nPitch, nPitch, nExtendedWidth, nExtendedHeight, nBitsPerPixel);
         break;
-        //case 4: // ¡‚Í–¢‘Î‰
+        //case 4: // ä»Šã¯æœªå¯¾å¿œ
         //  break;
       }
     }
@@ -740,7 +737,7 @@ public:
 
   //void	SetInterp(int rfilter, int sharp)
   //{
-  //  // TODO: ‚±‚ê‚È‚ñ‚Åƒ[ƒ‚¾‚¯H
+  //  // TODO: ã“ã‚Œãªã‚“ã§ã‚¼ãƒ­ã ã‘ï¼Ÿ
   //  pFrames[0]->SetInterp(rfilter, sharp);
   //}
 };
@@ -759,7 +756,7 @@ public:
     , params(KMVParam::SUPER_FRAME)
     , cuda(CreateKDeintCUDA())
   {
-    // ¡‚ÌŠ‘Î‰‚µ‚Ä‚¢‚é‚ÌƒRƒŒ‚¾‚¯
+    // ä»Šã®æ‰€å¯¾å¿œã—ã¦ã„ã‚‹ã®ã‚³ãƒ¬ã ã‘
     if (nHPad != 8) env->ThrowError("[KMSuper] hpad must be 8.");
     if (nVPad != 8) env->ThrowError("[KMSuper] vpad must be 8.");
     if (nSharp != 2) env->ThrowError("[KMSuper] sharp must be 2.");
@@ -1051,7 +1048,7 @@ enum {
   MAX_BATCH = 8,
 };
 
-// •K‚¸ƒoƒbƒ`•ª‚Ü‚Æ‚ß‚Äˆ—‚·‚éiÅŒã‚Æ‚©‚ÅƒtƒŒ[ƒ€‚ª‚È‚¢‚Æ‚«‚Íƒ|ƒCƒ“ƒ^‚ğ•¡»‚µ‚Ä“n‚·j
+// å¿…ãšãƒãƒƒãƒåˆ†ã¾ã¨ã‚ã¦å‡¦ç†ã™ã‚‹ï¼ˆæœ€å¾Œã¨ã‹ã§ãƒ•ãƒ¬ãƒ¼ãƒ ãŒãªã„ã¨ãã¯ãƒã‚¤ãƒ³ã‚¿ã‚’è¤‡è£½ã—ã¦æ¸¡ã™ï¼‰
 class PlaneOfBlocksBase {
 public:
   virtual ~PlaneOfBlocksBase() { }
@@ -1137,23 +1134,23 @@ class PlaneOfBlocks : public PlaneOfBlocksBase
   /* fetch the block in the reference frame, which is pointed by the vector (vx, vy) */
   const pixel_t *	GetRefBlock(int nVx, int nVy)
   {
-    return (p.nPel == 2) ? pRefYPlane->GetAbsolutePointerPel <1>((x[0] << 1) + nVx, (y[0] << 1) + nVy) :
-      (p.nPel == 1) ? pRefYPlane->GetAbsolutePointerPel <0>((x[0]) + nVx, (y[0]) + nVy) :
-      pRefYPlane->GetAbsolutePointerPel <2>((x[0] << 2) + nVx, (y[0] << 2) + nVy);
+    return (p.nPel == 2) ? pRefYPlane->template GetAbsolutePointerPel <1>((x[0] << 1) + nVx, (y[0] << 1) + nVy) :
+      (p.nPel == 1) ? pRefYPlane->template GetAbsolutePointerPel <0>((x[0]) + nVx, (y[0]) + nVy) :
+      pRefYPlane->template GetAbsolutePointerPel <2>((x[0] << 2) + nVx, (y[0] << 2) + nVy);
   }
 
   const pixel_t *	GetRefBlockU(int nVx, int nVy)
   {
-    return (p.nPel == 2) ? pRefUPlane->GetAbsolutePointerPel <1>((x[1] << 1) + (nVx >> p.nLogxRatioUV), (y[1] << 1) + (nVy >> p.nLogyRatioUV)) :
-      (p.nPel == 1) ? pRefUPlane->GetAbsolutePointerPel <0>((x[1]) + (nVx >> p.nLogxRatioUV), (y[1]) + (nVy >> p.nLogyRatioUV)) :
-      pRefUPlane->GetAbsolutePointerPel <2>((x[1] << 2) + (nVx >> p.nLogxRatioUV), (y[1] << 2) + (nVy >> p.nLogyRatioUV));
+    return (p.nPel == 2) ? pRefUPlane->template GetAbsolutePointerPel <1>((x[1] << 1) + (nVx >> p.nLogxRatioUV), (y[1] << 1) + (nVy >> p.nLogyRatioUV)) :
+      (p.nPel == 1) ? pRefUPlane->template GetAbsolutePointerPel <0>((x[1]) + (nVx >> p.nLogxRatioUV), (y[1]) + (nVy >> p.nLogyRatioUV)) :
+      pRefUPlane->template GetAbsolutePointerPel <2>((x[1] << 2) + (nVx >> p.nLogxRatioUV), (y[1] << 2) + (nVy >> p.nLogyRatioUV));
   }
 
   const pixel_t *	GetRefBlockV(int nVx, int nVy)
   {
-    return (p.nPel == 2) ? pRefVPlane->GetAbsolutePointerPel <1>((x[2] << 1) + (nVx >> p.nLogxRatioUV), (y[2] << 1) + (nVy >> p.nLogyRatioUV)) :
-      (p.nPel == 1) ? pRefVPlane->GetAbsolutePointerPel <0>((x[2]) + (nVx >> p.nLogxRatioUV), (y[2]) + (nVy >> p.nLogyRatioUV)) :
-      pRefVPlane->GetAbsolutePointerPel <2>((x[2] << 2) + (nVx >> p.nLogxRatioUV), (y[2] << 2) + (nVy >> p.nLogyRatioUV));
+    return (p.nPel == 2) ? pRefVPlane->template GetAbsolutePointerPel <1>((x[2] << 1) + (nVx >> p.nLogxRatioUV), (y[2] << 1) + (nVy >> p.nLogyRatioUV)) :
+      (p.nPel == 1) ? pRefVPlane->template GetAbsolutePointerPel <0>((x[2]) + (nVx >> p.nLogxRatioUV), (y[2]) + (nVy >> p.nLogyRatioUV)) :
+      pRefVPlane->template GetAbsolutePointerPel <2>((x[2] << 2) + (nVx >> p.nLogxRatioUV), (y[2] << 2) + (nVy >> p.nLogyRatioUV));
   }
 
   /* clip a vector to the horizontal boundaries */
@@ -1264,7 +1261,7 @@ class PlaneOfBlocks : public PlaneOfBlocksBase
       predictor = predictors[0];
     }
 
-    typedef typename std::conditional < sizeof(pixel_t) == 1, int, __int64 >::type safe_sad_t;
+    typedef typename std::conditional < sizeof(pixel_t) == 1, int, int64_t >::type safe_sad_t;
     nCurrentLambda = nCurrentLambda*(safe_sad_t)p.lsad / ((safe_sad_t)p.lsad + (predictor.sad >> 1))*p.lsad / ((safe_sad_t)p.lsad + (predictor.sad >> 1));
     // replaced hard threshold by soft in v1.10.2 by Fizick (a liitle complex expression to avoid overflow)
     //	int a = LSAD/(LSAD + (predictor.sad>>1));
@@ -1329,7 +1326,7 @@ class PlaneOfBlocks : public PlaneOfBlocksBase
       predictor = predictors[0];
     }
 
-    typedef typename std::conditional < sizeof(pixel_t) == 1, int, __int64 >::type safe_sad_t;
+    typedef typename std::conditional < sizeof(pixel_t) == 1, int, int64_t >::type safe_sad_t;
     nCurrentLambda = nCurrentLambda*(safe_sad_t)p.lsad / ((safe_sad_t)p.lsad + (predictor.sad >> 1))*p.lsad / ((safe_sad_t)p.lsad + (predictor.sad >> 1));
     // replaced hard threshold by soft in v1.10.2 by Fizick (a liitle complex expression to avoid overflow)
     //	int a = LSAD/(LSAD + (predictor.sad>>1));
@@ -1453,7 +1450,7 @@ class PlaneOfBlocks : public PlaneOfBlocksBase
       int cost = MotionDistorsion(vx, vy);
       if (cost >= nMinCost) return;
 
-      typedef typename std::conditional < sizeof(pixel_t) == 1, int, __int64 >::type safe_sad_t;
+      typedef typename std::conditional < sizeof(pixel_t) == 1, int, int64_t >::type safe_sad_t;
 
 #if 0
       if (debug && vx == -2 && vy == 1) {
@@ -1462,7 +1459,7 @@ class PlaneOfBlocks : public PlaneOfBlocksBase
         const pixel_t* pRefV = GetRefBlockV(vx, vy);
 
         int sum = 0;
-#if 0 // blksize==16—p
+#if 0 // blksize==16ç”¨
         for (int i = 0; i < 16; ++i) {
           int s = pSrc[0][nSrcPitch[0] * i];
           int r = pRefY[nRefPitch[0] * i];
@@ -1478,7 +1475,7 @@ class PlaneOfBlocks : public PlaneOfBlocksBase
           sum += std::abs(sv - rv);
           printf("i=%d,sum=%d\n", i, sum);
         }
-#else // blksize==32—p
+#else // blksize==32ç”¨
         for (int i = 0; i < 32; ++i) {
           int s0 = pSrc[0][nSrcPitch[0] * i];
           int r0 = pRefY[nRefPitch[0] * i];
@@ -1514,7 +1511,7 @@ class PlaneOfBlocks : public PlaneOfBlocksBase
       }
 #endif
 
-#if 1 // CUDA”Å‚Æ‡‚í‚¹‚é
+#if 1 // CUDAç‰ˆã¨åˆã‚ã›ã‚‹
       int sad = LumaSAD(GetRefBlock(vx, vy));
       if (p.chroma) {
         sad += SADCHROMA(pSrc[1], nSrcPitch[1], GetRefBlockU(vx, vy), nRefPitch[1])
@@ -1549,9 +1546,9 @@ class PlaneOfBlocks : public PlaneOfBlocksBase
       int cost = MotionDistorsion(vx, vy);
       if (cost >= nMinCost) return;
 
-      typedef typename std::conditional < sizeof(pixel_t) == 1, int, __int64 >::type safe_sad_t;
+      typedef typename std::conditional < sizeof(pixel_t) == 1, int, int64_t >::type safe_sad_t;
 
-#if 1 // CUDA”Å‚Æ‡‚í‚¹‚é
+#if 1 // CUDAç‰ˆã¨åˆã‚ã›ã‚‹
       int sad = LumaSAD(GetRefBlock(vx, vy));
       if (p.chroma) {
         sad += SADCHROMA(pSrc[1], nSrcPitch[1], GetRefBlockU(vx, vy), nRefPitch[1])
@@ -1578,8 +1575,8 @@ class PlaneOfBlocks : public PlaneOfBlocksBase
   bool debug;
   void PseudoEPZSearch()
   {
-    typedef typename std::conditional < sizeof(pixel_t) == 1, int, __int64 >::type safe_sad_t;
-#if 1 // CUDA”Å‚Æ‡‚í‚¹‚é
+    typedef typename std::conditional < sizeof(pixel_t) == 1, int, int64_t >::type safe_sad_t;
+#if 1 // CUDAç‰ˆã¨åˆã‚ã›ã‚‹
     FetchPredictorsCudaEmu();
 #else
     FetchPredictors();
@@ -1618,7 +1615,7 @@ class PlaneOfBlocks : public PlaneOfBlocksBase
         pRefV[0], pRefV[1], pRefV[0 + nRefPitch[2]], pRefV[1 + nRefPitch[2]]
       );
       int sum = 0;
-#if 0 // blksize==16—p
+#if 0 // blksize==16ç”¨
       for (int i = 0; i < 16; ++i) {
         int s = pSrc[0][nSrcPitch[0] * i];
         int r = pRefY[nRefPitch[0] * i];
@@ -1634,7 +1631,7 @@ class PlaneOfBlocks : public PlaneOfBlocksBase
         sum += std::abs(sv - rv);
         printf("i=%d,sum=%d\n", i, sum);
       }
-#elif 0 // blksize==32—p
+#elif 0 // blksize==32ç”¨
       for (int i = 0; i < 32; ++i) {
         int s0 = pSrc[0][nSrcPitch[0] * i];
         int r0 = pRefY[nRefPitch[0] * i];
@@ -2095,7 +2092,7 @@ public:
             v3 = src_vectors[iper2 + (jper2 + offy) * pob.p.nBlkX];
             v4 = src_vectors[iper2 + offx + (jper2 + offy) * pob.p.nBlkX];
           }
-          typedef typename std::conditional < sizeof(pixel_t) == 1, int, __int64 >::type safe_sad_t;
+          typedef typename std::conditional < sizeof(pixel_t) == 1, int, int64_t >::type safe_sad_t;
           safe_sad_t tmp_sad; // 16 bit worst case: 16 * sad_max: 16 * 3x32x32x65536 = 4+5+5+16 > 2^31 over limit
                               // in case of BlockSize > 32, e.g. 128x128x65536 is even more: 7+7+16=30 bits
 
@@ -2127,7 +2124,7 @@ public:
             }
             else {
               // safe multiplication
-              tmp_sad = ((__int64)a11*v1.sad + (__int64)a21*v2.sad + (__int64)a12*v3.sad + (__int64)a22*v4.sad) / normov;
+              tmp_sad = ((int64_t)a11*v1.sad + (int64_t)a21*v2.sad + (int64_t)a12*v3.sad + (int64_t)a22*v4.sad) / normov;
             }
           }
           else // large overlap. Weights are not quite correct but let it be
@@ -2215,7 +2212,7 @@ public:
     batchdata = (void*)&((uint8_t*)blocks)[p.nBlkCount * p.batch * kernel->GetSearchBlockSize()];
     loadmvbatchdata = (void*)&((uint8_t*)batchdata)[p.batch * kernel->GetSearchBatchSize()];
 
-    // ƒIƒtƒZƒbƒg‚µ‚Ä‚¨‚­
+    // ã‚ªãƒ•ã‚»ãƒƒãƒˆã—ã¦ãŠã
     vectors += N_CONST_VEC;
     sads += N_CONST_VEC;
   }
@@ -2454,7 +2451,7 @@ public:
 
     planes[0]->InitializeGlobalMV(batch, globalMV);
 
-    // pre‚ª‚ ‚ê‚Îout‚ÉƒRƒs[‚µ‚ÄƒŒƒxƒ‹‚ği‚ß‚Ä‚¨‚­
+    // preãŒã‚ã‚Œã°outã«ã‚³ãƒ”ãƒ¼ã—ã¦ãƒ¬ãƒ™ãƒ«ã‚’é€²ã‚ã¦ãŠã
     if (pre) {
       const VECTOR* preptr[ANALYZE_MAX_BATCH];
       std::copy(pre, pre + batch, preptr);
@@ -2495,7 +2492,7 @@ public:
 
       planes[i]->SearchMVs(batch, pSrcFrame, pRefFrame, globalMV, outptr, nBlks);
 
-      // ƒfƒoƒbƒO—p
+      // ãƒ‡ãƒãƒƒã‚°ç”¨
       //if (i == 1 && cuda->IsEnabled() == false) {
       //	FILE *fp = fopen("vector-1.txt", "w");
       //	for (int i = 0; i < nBlks; ++i) fprintf(fp, "%d,%d,%d,%d\n", i, outptr[i].x, outptr[i].y, outptr[i].sad);
@@ -2660,7 +2657,7 @@ public:
       params.chroma = false;
     }
 
-    // Partial Super ‚Ìê‡ nActual~ ‚ÆˆÙ‚È‚éê‡‚ª‚ ‚é
+    // Partial Super ã®å ´åˆ nActual~ ã¨ç•°ãªã‚‹å ´åˆãŒã‚ã‚‹
     const int nWidth = params.nActualWidth ? params.nActualWidth : params.nWidth;
     const int nHeight = params.nActualHeight ? params.nActualHeight : params.nHeight;
 
@@ -2696,7 +2693,7 @@ public:
 
     params.isBackward = isb;
 
-    // ŠeŠK‘w‚ÌƒuƒƒbƒN”‚ğŒvZ
+    // å„éšå±¤ã®ãƒ–ãƒ­ãƒƒã‚¯æ•°ã‚’è¨ˆç®—
     params.nAnalyzeLevels = nAnalyzeLevel;
     for (int i = 0; i < nAnalyzeLevel; i++) {
       LevelInfo linfo = {
@@ -2821,7 +2818,14 @@ public:
       // fill all vectors with invalid data
       pAnalyzer->WriteDefault(pDst);
 
+      #if AVISYNTH_MODE == AVISYNTH_NEO
       dst->SetProperty(GetAnalyzeValidPropName(), false);
+      #elif AVISYNTH_MODE == AVISYNTH_PLUS
+      auto avsmap = env->getFramePropsRW(dst);
+      env->propSetInt(avsmap, GetAnalyzeValidPropName(), false, AVSPropAppendMode::PROPAPPENDMODE_REPLACE);
+      #else
+      static_assert(false, "Invalid AVISYNTH_MODE");
+      #endif
 
       return dst;
     }
@@ -2829,11 +2833,11 @@ public:
     int requested = n - minframe;
     int requestedBatch = requested / maxBatch;
     if (requestedBatch == curBatch) {
-      // Šù‚ÉŒvZÏ‚İ
+      // æ—¢ã«è¨ˆç®—æ¸ˆã¿
       return batchFrames[requested % maxBatch];
     }
 
-    // ˆÙ‚È‚éƒoƒbƒ`‚È‚Ì‚ÅÄŒvZ
+    // ç•°ãªã‚‹ãƒãƒƒãƒãªã®ã§å†è¨ˆç®—
     int numBatch = std::min(maxframe - minframe - requestedBatch * maxBatch, maxBatch);
 
     PVideoFrame srcFrames[ANALYZE_MAX_BATCH];
@@ -2853,9 +2857,16 @@ public:
 #endif
 
     for (int b = 0; b < numBatch; ++b) {
-      // ƒtƒŒ[ƒ€Šm•Û
+      // ãƒ•ãƒ¬ãƒ¼ãƒ ç¢ºä¿
       batchFrames[b] = env->NewVideoFrame(vi);
+      #if AVISYNTH_MODE == AVISYNTH_NEO
       batchFrames[b]->SetProperty(GetAnalyzeValidPropName(), true);
+      #elif AVISYNTH_MODE == AVISYNTH_PLUS
+      auto avsmap = env->getFramePropsRW(batchFrames[b]);
+      env->propSetInt(avsmap, GetAnalyzeValidPropName(), true, AVSPropAppendMode::PROPAPPENDMODE_REPLACE);
+      #else
+      static_assert(false, "Invalid AVISYNTH_MODE");
+      #endif
       ppOut[b] = reinterpret_cast<VECTOR*>(batchFrames[b]->GetWritePtr());
 
       const int nsrc = requestedBatch * maxBatch + minframe + b;
@@ -3135,12 +3146,12 @@ class KMSuperCheck : public GenericVideoFilter
     int w = kPlane->GetExtendedWidth();
     int h = kPlane->GetExtendedHeight();
 
-    // ƒTƒuƒsƒNƒZƒ‹ƒ‹[ƒv
+    // ã‚µãƒ–ãƒ”ã‚¯ã‚»ãƒ«ãƒ«ãƒ¼ãƒ—
     for (int sy = 0; sy < nPel; ++sy) {
       for (int sx = 0; sx < nPel; ++sx) {
         const pixel_t* kptr = kPlane->GetAbsolutePointer(sx, sy);
         const pixel_t* mptr = mPlane->GetAbsolutePointer(sx, sy);
-        // ‰æ‘fƒ‹[ƒv
+        // ç”»ç´ ãƒ«ãƒ¼ãƒ—
         for (int y = 0; y < h; ++y) {
           for (int x = 0; x < w; ++x) {
             pixel_t kv = kptr[x + y * nPitch];
@@ -3209,7 +3220,7 @@ public:
   }
 };
 
-// KMAnalyze‹U‘•‚µ‚½MAnalyzeƒf[ƒ^
+// KMAnalyzeå½è£…ã—ãŸMAnalyzeãƒ‡ãƒ¼ã‚¿
 class KMVReplaceWithMV : public GenericVideoFilter
 {
   PClip mvv;
@@ -3268,10 +3279,17 @@ public:
     VECTOR* kdata = reinterpret_cast<VECTOR*>(ret->GetWritePtr());
 
     // validity
+    #if AVISYNTH_MODE == AVISYNTH_NEO
     ret->SetProperty(GetAnalyzeValidPropName(), pMv[1]);
+    #elif AVISYNTH_MODE == AVISYNTH_PLUS
+    auto avsmap = env->getFramePropsRW(ret);
+    env->propSetInt(avsmap, GetAnalyzeValidPropName(), pMv[1], AVSPropAppendMode::PROPAPPENDMODE_REPLACE);
+    #else
+    static_assert(false, "Invalid AVISYNTH_MODE");
+    #endif
     pMv += 2;
 
-    // mvƒf[ƒ^
+    // mvãƒ‡ãƒ¼ã‚¿
     for (int i = params->nAnalyzeLevels - 1; i >= 0; i--) {
       int nBlkCount = params->levelInfo[i].nBlkX * params->levelInfo[i].nBlkY;
       int length = pMv[0];
@@ -3295,16 +3313,16 @@ public:
   }
 };
 
-// MAnalyze‹U‘•‚µ‚½KMAnalyzeƒf[ƒ^
+// MAnalyzeå½è£…ã—ãŸKMAnalyzeãƒ‡ãƒ¼ã‚¿
 class MVReplaceWithKMV : public GenericVideoFilter
 {
   PClip kmv;
 
   const KMVParam* params;
 
-  // ƒwƒbƒ_‚È‚Ç‚Ìƒf[ƒ^‚ÌÄŒ»‚Í‘å•Ï‚È‚Ì‚ÅA
-  // 1–‡‚¾‚¯mvtools‚©‚çƒtƒŒ[ƒ€‚ğæ“¾‚µ‚Ä
-  // ƒRƒs[‚µ‚ÄAƒeƒ“ƒvƒŒ[ƒg‚É‚µ‚Ä‚¨‚­
+  // ãƒ˜ãƒƒãƒ€ãªã©ã®ãƒ‡ãƒ¼ã‚¿ã®å†ç¾ã¯å¤§å¤‰ãªã®ã§ã€
+  // 1æšã ã‘mvtoolsã‹ã‚‰ãƒ•ãƒ¬ãƒ¼ãƒ ã‚’å–å¾—ã—ã¦
+  // ã‚³ãƒ”ãƒ¼ã—ã¦ã€ãƒ†ãƒ³ãƒ—ãƒ¬ãƒ¼ãƒˆã«ã—ã¦ãŠã
   std::vector<int> tmpldata;
 
   void GetTemplateData(int n, PNeoEnv env)
@@ -3346,7 +3364,7 @@ public:
   {
     PNeoEnv env = env_;
 
-    // ƒeƒ“ƒvƒŒ[ƒgæ“¾
+    // ãƒ†ãƒ³ãƒ—ãƒ¬ãƒ¼ãƒˆå–å¾—
     if (tmpldata.size() == 0) {
       GetTemplateData(n, env);
     }
@@ -3358,17 +3376,25 @@ public:
     const LevelInfo *linfo = params->levelInfo;
     int* pMv = reinterpret_cast<int*>(ret->GetWritePtr());
 
-    // ƒeƒ“ƒvƒŒ[ƒg‚©‚çƒRƒs[
+    // ãƒ†ãƒ³ãƒ—ãƒ¬ãƒ¼ãƒˆã‹ã‚‰ã‚³ãƒ”ãƒ¼
     memcpy(pMv, tmpldata.data(), tmpldata.size() * sizeof(int));
 
     pMv += pMv[0] / sizeof(int);
 
     // validity
+    #if AVISYNTH_MODE == AVISYNTH_NEO
     bool isValid = (kmvframe->GetProperty(GetAnalyzeValidPropName())->GetInt() != 0);
+    #elif AVISYNTH_MODE == AVISYNTH_PLUS
+    int error;
+    const int propVal = env->propGetInt(env->getFramePropsRO(kmvframe), GetAnalyzeValidPropName(), 0, &error);
+    bool isValid = !error && (propVal != 0);
+    #else
+    static_assert(false, "Invalid AVISYNTH_MODE");
+    #endif
     pMv[1] = isValid;
     pMv += 2;
 
-    // mvƒf[ƒ^
+    // mvãƒ‡ãƒ¼ã‚¿
     for (int i = params->nAnalyzeLevels - 1; i >= 0; i--) {
       int nBlkCount = params->levelInfo[i].nBlkX * params->levelInfo[i].nBlkY;
       int length = pMv[0];
@@ -3455,7 +3481,15 @@ public:
     GetMVData(n, pMv, data_size, env);
 
     // validity
+    #if AVISYNTH_MODE == AVISYNTH_NEO
     bool isValid = (kmvframe->GetProperty(GetAnalyzeValidPropName())->GetInt() != 0);
+    #elif AVISYNTH_MODE == AVISYNTH_PLUS
+    int error;
+    const int propVal = env->propGetInt(env->getFramePropsRO(kmvframe), GetAnalyzeValidPropName(), 0, &error);
+    bool isValid = !error && (propVal != 0);
+    #else
+    static_assert(false, "Invalid AVISYNTH_MODE");
+    #endif
     if (isValid != (pMv[1] != 0)) {
       env->ThrowError("Validity missmatch");
     }
@@ -3515,8 +3549,18 @@ public:
     const VECTOR* kdata2 = reinterpret_cast<const VECTOR*>(kmvframe2->GetReadPtr());
 
     // validity
+    #if AVISYNTH_MODE == AVISYNTH_NEO
     bool data1valid = kmvframe1->GetProperty(GetAnalyzeValidPropName())->GetInt() != 0;
     bool data2valid = kmvframe2->GetProperty(GetAnalyzeValidPropName())->GetInt() != 0;
+    #elif AVISYNTH_MODE == AVISYNTH_PLUS
+    int error;
+    const int propVal1 = env->propGetInt(env->getFramePropsRO(kmvframe1), GetAnalyzeValidPropName(), 0, &error);
+    bool data1valid = !error && (propVal1 != 0);
+    const int propVal2 = env->propGetInt(env->getFramePropsRO(kmvframe2), GetAnalyzeValidPropName(), 0, &error);
+    bool data2valid = !error && (propVal2 != 0);
+    #else
+    static_assert(false, "Invalid AVISYNTH_MODE");
+    #endif
     if (data1valid != data2valid) {
       env->ThrowError("Validity missmatch");
     }
@@ -3592,7 +3636,7 @@ public:
     fWin1UVxlast = new float[nx];
     for (int i = 0; i < ox; i++)
     {
-      fWin1UVx[i] = float(cos(PI*(i - ox + 0.5f) / (ox * 2)));
+      fWin1UVx[i] = float(std::cos(PI*(i - ox + 0.5f) / (ox * 2)));
       fWin1UVx[i] = fWin1UVx[i] * fWin1UVx[i];// left window (rised cosine)
       fWin1UVxfirst[i] = 1; // very first window
       fWin1UVxlast[i] = fWin1UVx[i]; // very last
@@ -3605,7 +3649,7 @@ public:
     }
     for (int i = nx - ox; i < nx; i++)
     {
-      fWin1UVx[i] = float(cos(PI*(i - nx + ox + 0.5f) / (ox * 2)));
+      fWin1UVx[i] = float(std::cos(PI*(i - nx + ox + 0.5f) / (ox * 2)));
       fWin1UVx[i] = fWin1UVx[i] * fWin1UVx[i];// right window (falled cosine)
       fWin1UVxfirst[i] = fWin1UVx[i]; // very first window
       fWin1UVxlast[i] = 1; // very last
@@ -3616,7 +3660,7 @@ public:
     fWin1UVylast = new float[ny];
     for (int i = 0; i < oy; i++)
     {
-      fWin1UVy[i] = float(cos(PI*(i - oy + 0.5f) / (oy * 2)));
+      fWin1UVy[i] = float(std::cos(PI*(i - oy + 0.5f) / (oy * 2)));
       fWin1UVy[i] = fWin1UVy[i] * fWin1UVy[i];// left window (rised cosine)
       fWin1UVyfirst[i] = 1; // very first window
       fWin1UVylast[i] = fWin1UVy[i]; // very last
@@ -3629,7 +3673,7 @@ public:
     }
     for (int i = ny - oy; i < ny; i++)
     {
-      fWin1UVy[i] = float(cos(PI*(i - ny + oy + 0.5f) / (oy * 2)));
+      fWin1UVy[i] = float(std::cos(PI*(i - ny + oy + 0.5f) / (oy * 2)));
       fWin1UVy[i] = fWin1UVy[i] * fWin1UVy[i];// right window (falled cosine)
       fWin1UVyfirst[i] = fWin1UVy[i]; // very first window
       fWin1UVylast[i] = 1; // very last
@@ -4053,7 +4097,7 @@ public:
   PVideoFrame GetRefFrame(bool &usable_flag, PClip &super, int n, PNeoEnv env)
   {
     usable_flag = isValid;
-    // CUDA‚Ìê‡‚ÍŒã‚Åˆ—‚³‚ê‚é
+    // CUDAã®å ´åˆã¯å¾Œã§å‡¦ç†ã•ã‚Œã‚‹
     if (env->GetDeviceType() == DEV_TYPE_CPU) {
       usable_flag &= !pFrames[0]->IsSceneChange(nSCD1, nSCD2);
     }
@@ -4201,7 +4245,7 @@ class KMDegrainCore : public KMDegrainCoreBase
         return true;
       }
     }
-    // —LŒø‚ÈQÆƒtƒŒ[ƒ€‚ª1–‡‚à‚È‚¢
+    // æœ‰åŠ¹ãªå‚ç…§ãƒ•ãƒ¬ãƒ¼ãƒ ãŒ1æšã‚‚ãªã„
     return false;
   }
 
@@ -4594,17 +4638,17 @@ class KMDegrainX : public GenericVideoFilter
     int nBlkX = params->levelInfo[0].nBlkX;
     int nBlkY = params->levelInfo[0].nBlkY;
 
-    // tmpŠm•Û
-    VideoInfo tmpvi = { 0 };
-    // 420‘O’ñAtmp‚Í2”{‚ÌƒTƒCƒY
-    // nSrcPitchY < nSrcPitchUV * 2 ‚Ì‰Â”\«‚ª‚ ‚é‚Ì‚Å’ˆÓ
-    //i‘å‚«‚¢‚Ô‚ñ‚É‚ÍŒvZã–â‘è‚È‚¢‚Ì‚ÅƒRƒŒ‚Åg‚¤j
+    // tmpç¢ºä¿
+    VideoInfo tmpvi = VideoInfo();
+    // 420å‰æã€tmpã¯2å€ã®ã‚µã‚¤ã‚º
+    // nSrcPitchY < nSrcPitchUV * 2 ã®å¯èƒ½æ€§ãŒã‚ã‚‹ã®ã§æ³¨æ„
+    //ï¼ˆå¤§ãã„ã¶ã‚“ã«ã¯è¨ˆç®—ä¸Šå•é¡Œãªã„ã®ã§ã‚³ãƒ¬ã§ä½¿ã†ï¼‰
     tmpvi.width = (nSrcPitchUV * 2) * 2;
     tmpvi.height = vi.height;
     tmpvi.pixel_type = vi.pixel_type;
     PVideoFrame tmp = env->NewVideoFrame(tmpvi);
 
-    // ƒ[ƒNŠm•Û
+    // ãƒ¯ãƒ¼ã‚¯ç¢ºä¿
     int degrainBlock;
     int degrainArg;
     cuda->get(pixel_t())->GetDegrainStructSize(delta, degrainBlock, degrainArg);
@@ -4779,11 +4823,19 @@ public:
     PVideoFrame mvF[MAX_DEGRAIN];
     PVideoFrame refF[MAX_DEGRAIN];
 
-    // mv,refæ“¾
+    // mv,refå–å¾—
     if (useFlag != USE_ONLY_AFTER) {
       for (int j = delta - 1; j >= 0; j--) {
         mvF[j] = rawClipF[j]->GetFrame(n, env);
+        #if AVISYNTH_MODE == AVISYNTH_NEO
         bool isValid = mvF[j]->GetProperty(GetAnalyzeValidPropName())->GetInt() != 0;
+        #elif AVISYNTH_MODE == AVISYNTH_PLUS
+        int error;
+        const int propVal = env->propGetInt(env->getFramePropsRO(mvF[j]), GetAnalyzeValidPropName(), 0, &error);
+        bool isValid = !error && (propVal != 0);
+        #else
+        static_assert(false, "Invalid AVISYNTH_MODE");
+        #endif
         mvClipF[j]->SetData(reinterpret_cast<const VECTOR*>(mvF[j]->GetReadPtr()), isValid);
         refF[j] = mvClipF[j]->GetRefFrame(isUsableF[j], super, n, env);
         SetSuperFrameTarget(superF[j].get(), refF[j], params->nPixelShift);
@@ -4797,7 +4849,15 @@ public:
     if (useFlag != USE_ONLY_BEFORE) {
       for (int j = 0; j < delta; j++) {
         mvB[j] = rawClipB[j]->GetFrame(n, env);
+        #if AVISYNTH_MODE == AVISYNTH_NEO
         bool isValid = mvB[j]->GetProperty(GetAnalyzeValidPropName())->GetInt() != 0;
+        #elif AVISYNTH_MODE == AVISYNTH_PLUS
+        int error;
+        const int propVal = env->propGetInt(env->getFramePropsRO(mvB[j]), GetAnalyzeValidPropName(), 0, &error);
+        bool isValid = !error && (propVal != 0);
+        #else
+        static_assert(false, "Invalid AVISYNTH_MODE");
+        #endif
         mvClipB[j]->SetData(reinterpret_cast<const VECTOR*>(mvB[j]->GetReadPtr()), isValid);
         refB[j] = mvClipB[j]->GetRefFrame(isUsableB[j], super, n, env);
         SetSuperFrameTarget(superB[j].get(), refB[j], params->nPixelShift);
@@ -5227,17 +5287,17 @@ class KMCompensate : public GenericVideoFilter
     int nBlkX = params->levelInfo[0].nBlkX;
     int nBlkY = params->levelInfo[0].nBlkY;
 
-    // tmpŠm•Û
-    VideoInfo tmpvi = { 0 };
-    // 420‘O’ñAtmp‚Í2”{‚ÌƒTƒCƒY
-    // nSrcPitchY < nSrcPitchUV * 2 ‚Ì‰Â”\«‚ª‚ ‚é‚Ì‚Å’ˆÓ
-    //i‘å‚«‚¢‚Ô‚ñ‚É‚ÍŒvZã–â‘è‚È‚¢‚Ì‚ÅƒRƒŒ‚Åg‚¤j
+    // tmpç¢ºä¿
+    VideoInfo tmpvi = VideoInfo();
+    // 420å‰æã€tmpã¯2å€ã®ã‚µã‚¤ã‚º
+    // nSrcPitchY < nSrcPitchUV * 2 ã®å¯èƒ½æ€§ãŒã‚ã‚‹ã®ã§æ³¨æ„
+    //ï¼ˆå¤§ãã„ã¶ã‚“ã«ã¯è¨ˆç®—ä¸Šå•é¡Œãªã„ã®ã§ã‚³ãƒ¬ã§ä½¿ã†ï¼‰
     tmpvi.width = (nSrcPitchUV * 2) * 2;
     tmpvi.height = vi.height;
     tmpvi.pixel_type = vi.pixel_type;
     PVideoFrame tmp = env->NewVideoFrame(tmpvi);
 
-    // ƒ[ƒNŠm•Û
+    // ãƒ¯ãƒ¼ã‚¯ç¢ºä¿
     int blockBytes = cuda->get(pixel_t())->GetCompensateStructSize() * nBlkX * nBlkY * 3/*YUV*/;
     int scBytes = sizeof(int);
     int work_bytes = blockBytes + scBytes;
@@ -5333,7 +5393,7 @@ public:
     , super(_super)
     , vectors(vectors)
   {
-    // TODO: super ‚Æ vectors ‚ª‡’v‚µ‚Ä‚é‚±‚Æ‚ğŠm”F
+    // TODO: super ã¨ vectors ãŒåˆè‡´ã—ã¦ã‚‹ã“ã¨ã‚’ç¢ºèª
 
     for (int i = 0; i < 2; ++i) {
       superFrame[i] = std::unique_ptr<KMSuperFrame>(
@@ -5389,7 +5449,15 @@ public:
     SetSuperFrameTarget(superFrame[0].get(), ref0, params->nPixelShift);
 
     PVideoFrame mv = vectors->GetFrame(n, env);
+  #if AVISYNTH_MODE == AVISYNTH_NEO
     bool isValid = mv->GetProperty(GetAnalyzeValidPropName())->GetInt() != 0;
+  #elif AVISYNTH_MODE == AVISYNTH_PLUS
+    int error;
+    const int propVal = env->propGetInt(env->getFramePropsRO(mv), GetAnalyzeValidPropName(), 0, &error);
+    bool isValid = !error && (propVal != 0);
+  #else
+    static_assert(false, "Invalid AVISYNTH_MODE");
+    #endif
     mvClip->SetData(reinterpret_cast<const VECTOR*>(mv->GetReadPtr()), isValid);
     PVideoFrame	ref = mvClip->GetRefFrame(usable_flag, super, n, env);
     SetSuperFrameTarget(superFrame[1].get(), ref, params->nPixelShift);

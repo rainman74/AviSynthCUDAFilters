@@ -1,8 +1,7 @@
-#define _CRT_SECURE_NO_WARNINGS
+ï»¿#define _CRT_SECURE_NO_WARNINGS
 #include "avisynth.h"
 
-#define NOMINMAX
-#include <windows.h>
+#include "rgy_osdep.h"
 
 #include <algorithm>
 #include <memory>
@@ -60,7 +59,7 @@ __global__ void kl_copy_pad(
     }
 }
 
-// width ‚Í Pad ‚ğŠÜ‚Ü‚È‚¢’·‚³
+// width ã¯ Pad ã‚’å«ã¾ãªã„é•·ã•
 // block(2, -), threads(hPad, -)
 template <typename pixel_t>
 __global__ void kl_pad_frame_h(pixel_t* ptr, int pitch, int hPad, int width, int height)
@@ -79,7 +78,7 @@ __global__ void kl_pad_frame_h(pixel_t* ptr, int pitch, int hPad, int width, int
   }
 }
 
-// height ‚Í Pad ‚ğŠÜ‚Ü‚È‚¢’·‚³
+// height ã¯ Pad ã‚’å«ã¾ãªã„é•·ã•
 // block(-, 2), threads(-, vPad)
 template <typename pixel_t>
 __global__ void kl_pad_frame_v(pixel_t* ptr, int pitch, int vPad, int width, int height)
@@ -181,8 +180,8 @@ __global__ void kl_RB2B_bilinear_filtered(
   int tx = threadIdx.x;
   int ty = threadIdx.y;
 
-  // Vertical‚ğÀs
-  // Horizontal‚ÅQÆ‚·‚é‚½‚ß—¼’[1—ñ‚¸‚Â—]•ª‚ÉÀs
+  // Verticalã‚’å®Ÿè¡Œ
+  // Horizontalã§å‚ç…§ã™ã‚‹ãŸã‚ä¸¡ç«¯1åˆ—ãšã¤ä½™åˆ†ã«å®Ÿè¡Œ
   int x = tx - 1 + blockIdx.x * (RB2B_BILINEAR_W - 2);
   int y = ty + blockIdx.y * RB2B_BILINEAR_H;
   int y2 = y * 2;
@@ -204,12 +203,12 @@ __global__ void kl_RB2B_bilinear_filtered(
 
   __syncthreads();
 
-  // Horizontal‚ğÀs
+  // Horizontalã‚’å®Ÿè¡Œ
   x = tx + blockIdx.x * ((RB2B_BILINEAR_W - 2) / 2);
   int tx2 = tx * 2;
 
   if (tx < ((RB2B_BILINEAR_W - 2) / 2) && y < nHeight) {
-    // tmp‚Í[0][1]‚ªŒ´“_‚Å‚ ‚é‚±‚Æ‚É’ˆÓ
+    // tmpã¯[0][1]ãŒåŸç‚¹ã§ã‚ã‚‹ã“ã¨ã«æ³¨æ„
     if (x < 1) {
       pDst[x + y * nDstPitch] = (tmp[ty][tx2 + 1] + tmp[ty][tx2 + 2] + 1) >> 1;
     }
@@ -285,13 +284,13 @@ __global__ void kl_RB2B_bilinear_filtered_with_pad(
 /////////////////////////////////////////////////////////////////////////////
 
 
-typedef int sad_t; // Œã‚Åfloat‚É‚·‚é
+typedef int sad_t; // å¾Œã§floatã«ã™ã‚‹
 
 struct SearchBlock {
-  // [0-3]: nDxMax, nDyMax, nDxMin, nDyMin iMax‚ÍMax-1‚É‚µ‚Ä‚¨‚­j
+  // [0-3]: nDxMax, nDyMax, nDxMin, nDyMin ï¼ˆMaxã¯Max-1ã«ã—ã¦ãŠãï¼‰
   // [4-9]: Left predictor, Up predictor, bottom-right predictor(from coarse level)
-  // –³Œø‚È‚Æ‚±‚ë‚Íì‚ç‚È‚¢‚æ‚¤‚É‚·‚éiÅ’á‚Å‚à‚Ç‚ê‚©‚P‚Â‚Í—LŒø‚È‚Ì‚Å–³Œø‚È‚ë‚Æ‚±‚ë‚Í‚»‚ÌƒCƒ“ƒfƒbƒNƒX‚Å–„‚ß‚éj
-  // [10-11]: predictor ‚Ì x, y
+  // ç„¡åŠ¹ãªã¨ã“ã‚ã¯ä½œã‚‰ãªã„ã‚ˆã†ã«ã™ã‚‹ï¼ˆæœ€ä½ã§ã‚‚ã©ã‚Œã‹ï¼‘ã¤ã¯æœ‰åŠ¹ãªã®ã§ç„¡åŠ¹ãªã‚ã¨ã“ã‚ã¯ãã®ã‚¤ãƒ³ãƒ‡ãƒƒã‚¯ã‚¹ã§åŸ‹ã‚ã‚‹ï¼‰
+  // [10-11]: predictor ã® x, y
   int data[12];
   // [0-3]: penaltyZero, penaltyGlobal, 0(penaltyPredictor), penaltyNew
   // [4]: lambda
@@ -328,8 +327,8 @@ __device__ int dev_sq_norm(int ax, int ay, int bx, int by) {
   return (ax - bx) * (ax - bx) + (ay - by) * (ay - by);
 }
 
-// pRef ‚Í ƒuƒƒbƒNƒIƒtƒZƒbƒg•ª‚ğ—\‚ßˆÚ“®‚³‚¹‚Ä‚¨‚¢‚½ƒ|ƒCƒ“ƒ^
-// vx,vy ‚Í ƒTƒuƒsƒNƒZƒ‹‚àŠÜ‚ß‚½ƒxƒNƒgƒ‹
+// pRef ã¯ ãƒ–ãƒ­ãƒƒã‚¯ã‚ªãƒ•ã‚»ãƒƒãƒˆåˆ†ã‚’äºˆã‚ç§»å‹•ã•ã›ã¦ãŠã„ãŸãƒã‚¤ãƒ³ã‚¿
+// vx,vy ã¯ ã‚µãƒ–ãƒ”ã‚¯ã‚»ãƒ«ã‚‚å«ã‚ãŸãƒ™ã‚¯ãƒˆãƒ«
 template <typename pixel_t, int NPEL>
 __device__ const pixel_t* dev_get_ref_block(const pixel_t* pRef, int nPitch, int nImgPitch, int vx, int vy)
 {
@@ -356,10 +355,10 @@ __device__ const pixel_t* dev_get_ref_block(const pixel_t* pRef, int nPitch, int
 
 template <typename pixel_t>
 __device__ unsigned int load4pix(const pixel_t *ptr, int x, int y, int pitch, int offset) {
-    // 4ƒoƒCƒg‹«ŠE‚É‚È‚é‚æ‚¤‚ÉƒIƒtƒZƒbƒg‚ğ‰ÁZ‚µ‚Äƒ[ƒh
+    // 4ãƒã‚¤ãƒˆå¢ƒç•Œã«ãªã‚‹ã‚ˆã†ã«ã‚ªãƒ•ã‚»ãƒƒãƒˆã‚’åŠ ç®—ã—ã¦ãƒ­ãƒ¼ãƒ‰
     unsigned int ret = *(unsigned int*)&ptr[x + y * pitch - offset];
     if (offset > 0) {
-        // Ÿ‚Ì4ƒoƒCƒg‚ğƒ[ƒh‚µ‚Äoffset•ª‚¾‚¯ƒVƒtƒg‚µ‚ÄŒ‹‡
+        // æ¬¡ã®4ãƒã‚¤ãƒˆã‚’ãƒ­ãƒ¼ãƒ‰ã—ã¦offsetåˆ†ã ã‘ã‚·ãƒ•ãƒˆã—ã¦çµåˆ
         unsigned int hi32 = *(unsigned int*)&ptr[x + y * pitch - offset + 4];
         ret = __funnelshift_rc(ret, hi32, offset * 8);
     }
@@ -367,7 +366,7 @@ __device__ unsigned int load4pix(const pixel_t *ptr, int x, int y, int pitch, in
 }
 template <typename pixel_t>
 __device__ unsigned int load4pixAligned(const pixel_t *ptr, int x, int y, int pitch) {
-    // 4ƒoƒCƒg‹«ŠE‚É‚È‚é‚æ‚¤‚ÉƒIƒtƒZƒbƒg‚ğ‰ÁZ‚µ‚Äƒ[ƒh
+    // 4ãƒã‚¤ãƒˆå¢ƒç•Œã«ãªã‚‹ã‚ˆã†ã«ã‚ªãƒ•ã‚»ãƒƒãƒˆã‚’åŠ ç®—ã—ã¦ãƒ­ãƒ¼ãƒ‰
     unsigned int ret = *(unsigned int*)&ptr[x + y * pitch];
     return ret;
 }
@@ -385,37 +384,37 @@ __device__ sad_t dev_calc_sad(
   };
   int sad = 0;
   if (sizeof(pixel_t) == 1) {
-    const int threadnum = BLK_SIZE; // ‚±‚ÌƒuƒƒbƒN‚ğ’S“–‚·‚éƒXƒŒƒbƒh”
-    const int step = 4;             // 4pix‚¸‚Âˆ—
-    const int threadPerLine = BLK_SIZE / step; // 1s‚É•K—v‚ÈƒXƒŒƒbƒh”
-    const int yx = (wi % threadPerLine) * step; // 1s‚Ì’†‚Å‚ÌˆÊ’u
-          int yy =  wi / threadPerLine;          // ’S“–‚·‚és
+    const int threadnum = BLK_SIZE; // ã“ã®ãƒ–ãƒ­ãƒƒã‚¯ã‚’æ‹…å½“ã™ã‚‹ã‚¹ãƒ¬ãƒƒãƒ‰æ•°
+    const int step = 4;             // 4pixãšã¤å‡¦ç†
+    const int threadPerLine = BLK_SIZE / step; // 1è¡Œã«å¿…è¦ãªã‚¹ãƒ¬ãƒƒãƒ‰æ•°
+    const int yx = (wi % threadPerLine) * step; // 1è¡Œã®ä¸­ã§ã®ä½ç½®
+          int yy =  wi / threadPerLine;          // æ‹…å½“ã™ã‚‹è¡Œ
     const int ystep = threadnum / threadPerLine;
-    const int refYoffset = ((uint32_t)(size_t)pRefY) & (sizeof(uchar4) - 1); // 4ƒoƒCƒg‹«ŠE‚É‚È‚é‚æ‚¤‚ÉƒIƒtƒZƒbƒg‚ğŒvZ
+    const int refYoffset = ((uint32_t)(size_t)pRefY) & (sizeof(uchar4) - 1); // 4ãƒã‚¤ãƒˆå¢ƒç•Œã«ãªã‚‹ã‚ˆã†ã«ã‚ªãƒ•ã‚»ãƒƒãƒˆã‚’è¨ˆç®—
     #pragma unroll
-    for (int i = 0; i < BLK_SIZE; i += ystep, yy += ystep) { // 4‰ñƒ‹[ƒv
+    for (int i = 0; i < BLK_SIZE; i += ystep, yy += ystep) { // 4å›ãƒ«ãƒ¼ãƒ—
         unsigned int src4 = load4pixAligned(pSrcY, yx, yy, BLK_SIZE);
         unsigned int ref4 = load4pix(pRefY, yx, yy, nPitchY, refYoffset);
         sad = __vabsdiff4(src4, ref4, sad);
     }
   } else {
     int yx = wi;
-    for (int yy = 0; yy < BLK_SIZE; yy++) { // 16‰ñƒ‹[ƒv
+    for (int yy = 0; yy < BLK_SIZE; yy++) { // 16å›ãƒ«ãƒ¼ãƒ—
       sad = __sad(pSrcY[yx + yy * BLK_SIZE], pRefY[yx + yy * nPitchY], sad);
     }
   }
   if (CHROMA) {
     if (sizeof(pixel_t) == 1 && BLK_SIZE >= 16) {
-        const int threadnum = BLK_SIZE; // ‚±‚ÌƒuƒƒbƒN‚ğ’S“–‚·‚éƒXƒŒƒbƒh”
-        const int step = 4;             // 4pix‚¸‚Âˆ—
-        const int threadPerLine = BLK_SIZE_UV / step; // 1s‚É•K—v‚ÈƒXƒŒƒbƒh”
-        const int uvx = (wi % threadPerLine) * step; // 1s‚Ì’†‚Å‚ÌˆÊ’u
-              int uvy =  wi / threadPerLine;          // ’S“–‚·‚és
+        const int threadnum = BLK_SIZE; // ã“ã®ãƒ–ãƒ­ãƒƒã‚¯ã‚’æ‹…å½“ã™ã‚‹ã‚¹ãƒ¬ãƒƒãƒ‰æ•°
+        const int step = 4;             // 4pixãšã¤å‡¦ç†
+        const int threadPerLine = BLK_SIZE_UV / step; // 1è¡Œã«å¿…è¦ãªã‚¹ãƒ¬ãƒƒãƒ‰æ•°
+        const int uvx = (wi % threadPerLine) * step; // 1è¡Œã®ä¸­ã§ã®ä½ç½®
+              int uvy =  wi / threadPerLine;          // æ‹…å½“ã™ã‚‹è¡Œ
         const int ystep = threadnum / threadPerLine;
-        const int refUoffset = ((uint32_t)(size_t)pRefU) & (sizeof(uchar4) - 1); // 4ƒoƒCƒg‹«ŠE‚É‚È‚é‚æ‚¤‚ÉƒIƒtƒZƒbƒg‚ğŒvZ
-        const int refVoffset = ((uint32_t)(size_t)pRefV) & (sizeof(uchar4) - 1); // 4ƒoƒCƒg‹«ŠE‚É‚È‚é‚æ‚¤‚ÉƒIƒtƒZƒbƒg‚ğŒvZ
+        const int refUoffset = ((uint32_t)(size_t)pRefU) & (sizeof(uchar4) - 1); // 4ãƒã‚¤ãƒˆå¢ƒç•Œã«ãªã‚‹ã‚ˆã†ã«ã‚ªãƒ•ã‚»ãƒƒãƒˆã‚’è¨ˆç®—
+        const int refVoffset = ((uint32_t)(size_t)pRefV) & (sizeof(uchar4) - 1); // 4ãƒã‚¤ãƒˆå¢ƒç•Œã«ãªã‚‹ã‚ˆã†ã«ã‚ªãƒ•ã‚»ãƒƒãƒˆã‚’è¨ˆç®—
         #pragma unroll
-        for (int t = 0; t < BLK_SIZE_UV; t += ystep, uvy += ystep) { // 1‰ñƒ‹[ƒv
+        for (int t = 0; t < BLK_SIZE_UV; t += ystep, uvy += ystep) { // 1å›ãƒ«ãƒ¼ãƒ—
             unsigned int src4, ref4;
             src4 = load4pixAligned(pSrcU, uvx, uvy, BLK_SIZE_UV);
             ref4 = load4pix(pRefU, uvx, uvy, nPitchU, refUoffset);
@@ -426,10 +425,10 @@ __device__ sad_t dev_calc_sad(
             sad = __vabsdiff4(src4, ref4, sad);
         }
     } else {
-      // UV‚Í8x8
+      // UVã¯8x8
       int uvx = wi % BLK_SIZE_UV;
       int uvy = wi / BLK_SIZE_UV;
-      for (int t = 0; t < HALF_UV; ++t, uvy += 2) { // 4‰ñƒ‹[ƒv
+      for (int t = 0; t < HALF_UV; ++t, uvy += 2) { // 4å›ãƒ«ãƒ¼ãƒ—
         sad = __sad(pSrcU[uvx + uvy * BLK_SIZE_UV], pRefU[uvx + uvy * nPitchU], sad);
         sad = __sad(pSrcV[uvx + uvy * BLK_SIZE_UV], pRefV[uvx + uvy * nPitchV], sad);
       }
@@ -454,17 +453,17 @@ __device__ sad_t dev_calc_sad_debug(
   };
   int sad = 0;
   int yx = wi;
-  for (int yy = 0; yy < BLK_SIZE; ++yy) { // 16‰ñƒ‹[ƒv
+  for (int yy = 0; yy < BLK_SIZE; ++yy) { // 16å›ãƒ«ãƒ¼ãƒ—
     sad = __sad(pSrcY[yx + yy * BLK_SIZE], pRefY[yx + yy * nPitchY], sad);
     if (debug && wi == 0) {
       printf("i=%d,sum=%d\n", yy, sad);
     }
   }
   if (CHROMA) {
-    // UV‚Í8x8
+    // UVã¯8x8
     int uvx = wi % BLK_SIZE_UV;
     int uvy = wi / BLK_SIZE_UV;
-    for (int t = 0; t < HALF_UV; ++t, uvy += 2) { // 4‰ñƒ‹[ƒv
+    for (int t = 0; t < HALF_UV; ++t, uvy += 2) { // 4å›ãƒ«ãƒ¼ãƒ—
       sad = __sad(pSrcU[uvx + uvy * BLK_SIZE_UV], pRefU[uvx + uvy * nPitchU], sad);
       sad = __sad(pSrcV[uvx + uvy * BLK_SIZE_UV], pRefV[uvx + uvy * nPitchV], sad);
       if (debug && wi == 0) {
@@ -485,13 +484,13 @@ __device__ void MinCost(CostResult& a, CostResult& b) {
   }
 }
 
-// MAX - (MAX/4) <= (Œ‹‰Ê‚ÌŒÂ”) <= MAX ‚Å‚ ‚é‚±‚Æ
-// ƒXƒŒƒbƒh”‚Í (Œ‹‰Ê‚ÌŒÂ”) - MAX/2
+// MAX - (MAX/4) <= (çµæœã®å€‹æ•°) <= MAX ã§ã‚ã‚‹ã“ã¨
+// ã‚¹ãƒ¬ãƒƒãƒ‰æ•°ã¯ (çµæœã®å€‹æ•°) - MAX/2
 template <int LEN, bool CPU_EMU>
 __device__ void dev_reduce_result(CostResult* tmp, int tid)
 {
   if (CPU_EMU) {
-    // ‡”Ô‚ğCPU”Å‚É‡‚í‚¹‚é
+    // é †ç•ªã‚’CPUç‰ˆã«åˆã‚ã›ã‚‹
     if (tid == 0) {
       for (int i = 1; i < LEN; ++i) {
         MinCost(tmp[0], tmp[i]);
@@ -506,7 +505,7 @@ __device__ void dev_reduce_result(CostResult* tmp, int tid)
   }
 }
 
-// ‡”Ô‚ÍCPU”Å‚É‡‚í‚¹‚é
+// é †ç•ªã¯CPUç‰ˆã«åˆã‚ã›ã‚‹
 __constant__ int2 c_expanding_search_1_area[] = {
   { 0, -1 },
   { 0, 1 },
@@ -519,7 +518,7 @@ __constant__ int2 c_expanding_search_1_area[] = {
   { 1, 1 },
 };
 
-// __syncthreads()‚ğŒÄ‚Ño‚µ‚Ä‚¢‚é‚Ì‚Å‘Sˆõ‚ÅŒÄ‚Ô
+// __syncthreads()ã‚’å‘¼ã³å‡ºã—ã¦ã„ã‚‹ã®ã§å…¨å“¡ã§å‘¼ã¶
 template <typename pixel_t, int BLK_SIZE, int NPEL, bool CHROMA, bool CPU_EMU>
 __device__ void dev_expanding_search_1(
   int debug,
@@ -566,7 +565,7 @@ __device__ void dev_expanding_search_1(
   __syncthreads();
 
   const bool vectorOKBx = isVectorOK[bx];
-  const unsigned int activemask = (BLK_SIZE >= WARP_SIZE) ? FULL_MASK : __ballot_sync(FULL_MASK, vectorOKBx); // BLK_SIZE >= WARP_SIZE ‚Ì‚Æ‚«ˆÈŠO‚Íwarp“à‚Åif•¶‚ÌŒ‹‰Ê‚ª•Ï‚í‚è‚¤‚é
+  const unsigned int activemask = (BLK_SIZE >= WARP_SIZE) ? FULL_MASK : __ballot_sync(FULL_MASK, vectorOKBx); // BLK_SIZE >= WARP_SIZE ã®ã¨ãä»¥å¤–ã¯warpå†…ã§ifæ–‡ã®çµæœãŒå¤‰ã‚ã‚Šã†ã‚‹
   if (vectorOKBx) {
     sad_t sad = dev_calc_sad<pixel_t, BLK_SIZE, CHROMA, (BLK_SIZE >= WARP_SIZE)>(wi, pSrcY, pSrcU, pSrcV, pRefY[bx], pRefU[bx], pRefV[bx], nPitchY, nPitchU, nPitchV, activemask);
     if (wi == 0) {
@@ -596,11 +595,11 @@ __device__ void dev_expanding_search_1(
 
   __syncthreads();
 
-  // Œ‹‰ÊW–ñ
-  if (tx < 4) { // reduce‚Í8-4=4ƒXƒŒƒbƒh‚ÅŒÄ‚Ô
+  // çµæœé›†ç´„
+  if (tx < 4) { // reduceã¯8-4=4ã‚¹ãƒ¬ãƒƒãƒ‰ã§å‘¼ã¶
     dev_reduce_result<8, CPU_EMU>(result, tx);
 
-    if (tx == 0) { // tx == 0‚ÍÅŒã‚Ìƒf[ƒ^‚ğ‘‚«‚ñ‚Å‚¢‚é‚Ì‚ÅƒAƒNƒZƒXOK
+    if (tx == 0) { // tx == 0ã¯æœ€å¾Œã®ãƒ‡ãƒ¼ã‚¿ã‚’æ›¸ãè¾¼ã‚“ã§ã„ã‚‹ã®ã§ã‚¢ã‚¯ã‚»ã‚¹OK
       if (result[0].cost < bestResult.cost) {
         bestResult = result[0];
       }
@@ -608,7 +607,7 @@ __device__ void dev_expanding_search_1(
   }
 }
 
-// ‡”Ô‚ÍCPU”Å‚É‡‚í‚¹‚é
+// é †ç•ªã¯CPUç‰ˆã«åˆã‚ã›ã‚‹
 __constant__ int2 c_expanding_search_2_area[] = {
 
   { -1, -2 },
@@ -631,7 +630,7 @@ __constant__ int2 c_expanding_search_2_area[] = {
   { 2, 2 },
 };
 
-// __syncthreads()‚ğŒÄ‚Ño‚µ‚Ä‚¢‚é‚Ì‚Å‘Sˆõ‚ÅŒÄ‚Ô
+// __syncthreads()ã‚’å‘¼ã³å‡ºã—ã¦ã„ã‚‹ã®ã§å…¨å“¡ã§å‘¼ã¶
 template <typename pixel_t, int BLK_SIZE, int NPEL, bool CHROMA, bool CPU_EMU>
 __device__ void dev_expanding_search_2(
   int debug,
@@ -673,7 +672,7 @@ __device__ void dev_expanding_search_2(
   __syncthreads();
   {
       const bool vectorOKBx = isVectorOK[bx];
-      const unsigned int activemask = (BLK_SIZE >= WARP_SIZE) ? FULL_MASK : __ballot_sync(FULL_MASK, vectorOKBx); // BLK_SIZE >= WARP_SIZE ‚Ì‚Æ‚«ˆÈŠO‚Íwarp“à‚Åif•¶‚ÌŒ‹‰Ê‚ª•Ï‚í‚è‚¤‚é
+      const unsigned int activemask = (BLK_SIZE >= WARP_SIZE) ? FULL_MASK : __ballot_sync(FULL_MASK, vectorOKBx); // BLK_SIZE >= WARP_SIZE ã®ã¨ãä»¥å¤–ã¯warpå†…ã§ifæ–‡ã®çµæœãŒå¤‰ã‚ã‚Šã†ã‚‹
       if (vectorOKBx) {
           sad_t sad = dev_calc_sad<pixel_t, BLK_SIZE, CHROMA, (BLK_SIZE >= WARP_SIZE)>(wi, pSrcY, pSrcU, pSrcV, pRefY[bx], pRefU[bx], pRefV[bx], nPitchY, nPitchU, nPitchV, activemask);
           if (wi == 0) {
@@ -684,7 +683,7 @@ __device__ void dev_expanding_search_2(
   {
       int bx2 = bx + 8;
       const bool vectorOKBx2 = isVectorOK[bx2];
-      const unsigned int activemask2 = (BLK_SIZE >= WARP_SIZE) ? FULL_MASK : __ballot_sync(FULL_MASK, vectorOKBx2); // BLK_SIZE >= WARP_SIZE ‚Ì‚Æ‚«ˆÈŠO‚Íwarp“à‚Åif•¶‚ÌŒ‹‰Ê‚ª•Ï‚í‚è‚¤‚é
+      const unsigned int activemask2 = (BLK_SIZE >= WARP_SIZE) ? FULL_MASK : __ballot_sync(FULL_MASK, vectorOKBx2); // BLK_SIZE >= WARP_SIZE ã®ã¨ãä»¥å¤–ã¯warpå†…ã§ifæ–‡ã®çµæœãŒå¤‰ã‚ã‚Šã†ã‚‹
       if (vectorOKBx2) {
           sad_t sad = dev_calc_sad<pixel_t, BLK_SIZE, CHROMA, (BLK_SIZE >= WARP_SIZE)>(wi, pSrcY, pSrcU, pSrcV, pRefY[bx2], pRefU[bx2], pRefV[bx2], nPitchY, nPitchU, nPitchV, activemask2);
           if (wi == 0) {
@@ -695,11 +694,11 @@ __device__ void dev_expanding_search_2(
 
   __syncthreads();
 
-  // Œ‹‰ÊW–ñ
-  if (tx < 8) { // reduce‚Í16-8=8ƒXƒŒƒbƒh‚ÅŒÄ‚Ô
+  // çµæœé›†ç´„
+  if (tx < 8) { // reduceã¯16-8=8ã‚¹ãƒ¬ãƒƒãƒ‰ã§å‘¼ã¶
     dev_reduce_result<16, CPU_EMU>(result, tx);
 
-    if (tx == 0) { // tx == 0‚ÍÅŒã‚Ìƒf[ƒ^‚ğ‘‚«‚ñ‚Å‚¢‚é‚Ì‚ÅƒAƒNƒZƒXOK
+    if (tx == 0) { // tx == 0ã¯æœ€å¾Œã®ãƒ‡ãƒ¼ã‚¿ã‚’æ›¸ãè¾¼ã‚“ã§ã„ã‚‹ã®ã§ã‚¢ã‚¯ã‚»ã‚¹OK
       if (result[0].cost < bestResult.cost) {
         bestResult = result[0];
       }
@@ -711,7 +710,7 @@ __constant__ int2 c_hex2_search_1_area[] = {
   { -2, 0 }, { -1, 2 }, { 1, 2 }, { 2, 0 }, { 1, -2 }, { -1, -2 }
 };
 
-// __syncthreads()‚ğŒÄ‚Ño‚µ‚Ä‚¢‚é‚Ì‚Å‘Sˆõ‚ÅŒÄ‚Ô
+// __syncthreads()ã‚’å‘¼ã³å‡ºã—ã¦ã„ã‚‹ã®ã§å…¨å“¡ã§å‘¼ã¶
 template <typename pixel_t, int BLK_SIZE, int NPEL, bool CHROMA, bool CPU_EMU>
 __device__ void dev_hex2_search_1(
   int debug,
@@ -757,7 +756,7 @@ __device__ void dev_hex2_search_1(
   __syncthreads();
 
   const bool vectorOKBx = isVectorOK[bx];
-  const unsigned int activemask = (BLK_SIZE >= WARP_SIZE) ? FULL_MASK : __ballot_sync(FULL_MASK, vectorOKBx); // BLK_SIZE >= WARP_SIZE ‚Ì‚Æ‚«ˆÈŠO‚Íwarp“à‚Åif•¶‚ÌŒ‹‰Ê‚ª•Ï‚í‚è‚¤‚é
+  const unsigned int activemask = (BLK_SIZE >= WARP_SIZE) ? FULL_MASK : __ballot_sync(FULL_MASK, vectorOKBx); // BLK_SIZE >= WARP_SIZE ã®ã¨ãä»¥å¤–ã¯warpå†…ã§ifæ–‡ã®çµæœãŒå¤‰ã‚ã‚Šã†ã‚‹
   if (vectorOKBx) {
     sad_t sad = dev_calc_sad<pixel_t, BLK_SIZE, CHROMA, (BLK_SIZE >= WARP_SIZE)>(wi, pSrcY, pSrcU, pSrcV, pRefY[bx], pRefU[bx], pRefV[bx], nPitchY, nPitchU, nPitchV, activemask);
     if (wi == 0) {
@@ -767,11 +766,11 @@ __device__ void dev_hex2_search_1(
 
   __syncthreads();
 
-  // Œ‹‰ÊW–ñ
-  if (tx < 2) { // reduce‚Í6-4=2ƒXƒŒƒbƒh‚ÅŒÄ‚Ô
+  // çµæœé›†ç´„
+  if (tx < 2) { // reduceã¯6-4=2ã‚¹ãƒ¬ãƒƒãƒ‰ã§å‘¼ã¶
     dev_reduce_result<6, CPU_EMU>(result, tx);
 
-    if (tx == 0) { // tx == 0‚ÍÅŒã‚Ìƒf[ƒ^‚ğ‘‚«‚ñ‚Å‚¢‚é‚Ì‚ÅƒAƒNƒZƒXOK
+    if (tx == 0) { // tx == 0ã¯æœ€å¾Œã®ãƒ‡ãƒ¼ã‚¿ã‚’æ›¸ãè¾¼ã‚“ã§ã„ã‚‹ã®ã§ã‚¢ã‚¯ã‚»ã‚¹OK
       if (result[0].cost < bestResult.cost) {
         bestResult = result[0];
       }
@@ -854,15 +853,15 @@ union SearchBatchData {
   int data[LEN];
 };
 
-// “¯Šú•û–@ 0:“¯Šú‚È‚µiƒfƒoƒbƒO—pj, 1:1‚¸‚Â“¯Šúi‚¸“xj, 2:2‚¸‚Â“¯Šúi’á¸“xj
+// åŒæœŸæ–¹æ³• 0:åŒæœŸãªã—ï¼ˆãƒ‡ãƒãƒƒã‚°ç”¨ï¼‰, 1:1ãšã¤åŒæœŸï¼ˆé«˜ç²¾åº¦ï¼‰, 2:2ãšã¤åŒæœŸï¼ˆä½ç²¾åº¦ï¼‰
 #define ANALYZE_SYNC 1
 
 template <typename pixel_t, int BLK_SIZE, int SEARCH, int NPEL, bool CHROMA, bool CPU_EMU>
 __global__ void
-#if 0 && __CUDA_ARCH__ < 700 // ‰º‹L‚Í‚¢‚ë‚¢‚ë•ÏX‚µ‚½Œ‹‰ÊAŒ»“_‚Å‚Í•s—v‚É‚È‚Á‚½‚½‚ßA–³Œø‰»‚·‚é
-    // ƒŒƒWƒXƒ^‚ğg‚¢‚·‚¬‚é‚ÆAPascal“™‚ÌÌ‚ÌGPU‚Å‚Í‘¬“x‚ª—‚¿‚é‚½‚ßA
-    // __launch_bounds__(maxThreadsPerBlock, minBlocksPerMultiprocessor) ‚ÅƒŒƒWƒXƒ^”‚ğŠÔÚ“I‚É§ŒÀ‚µ‚Ä‚¢‚é
-    // Å’á‚Å‚àSM‚ ‚½‚è4ƒuƒƒbƒN‚Í—¬‚¹‚é‚æ‚¤‚É’²®
+#if 0 && __CUDA_ARCH__ < 700 // ä¸‹è¨˜ã¯ã„ã‚ã„ã‚å¤‰æ›´ã—ãŸçµæœã€ç¾æ™‚ç‚¹ã§ã¯ä¸è¦ã«ãªã£ãŸãŸã‚ã€ç„¡åŠ¹åŒ–ã™ã‚‹
+    // ãƒ¬ã‚¸ã‚¹ã‚¿ã‚’ä½¿ã„ã™ãã‚‹ã¨ã€Pascalç­‰ã®æ˜”ã®GPUã§ã¯é€Ÿåº¦ãŒè½ã¡ã‚‹ãŸã‚ã€
+    // __launch_bounds__(maxThreadsPerBlock, minBlocksPerMultiprocessor) ã§ãƒ¬ã‚¸ã‚¹ã‚¿æ•°ã‚’é–“æ¥çš„ã«åˆ¶é™ã—ã¦ã„ã‚‹
+    // æœ€ä½ã§ã‚‚SMã‚ãŸã‚Š4ãƒ–ãƒ­ãƒƒã‚¯ã¯æµã›ã‚‹ã‚ˆã†ã«èª¿æ•´
     __launch_bounds__(BLK_SIZE * 8, 4)
 #endif
 kl_search(
@@ -905,7 +904,7 @@ kl_search(
 
     for (int blky = 0; blky < nBlkY; ++blky) {
 
-      // src‚ğshared memory‚É“]‘—
+      // srcã‚’shared memoryã«è»¢é€
       int offx = nPad + blkx * BLK_STEP;
       int offy = nPad + blky * BLK_STEP;
 
@@ -929,7 +928,7 @@ kl_search(
         }
       }
 
-      // ƒpƒ‰ƒ[ƒ^‚È‚Ç‚Ìƒf[ƒ^‚ğshared memory‚ÉŠi”[
+      // ãƒ‘ãƒ©ãƒ¡ãƒ¼ã‚¿ãªã©ã®ãƒ‡ãƒ¼ã‚¿ã‚’shared memoryã«æ ¼ç´
       __shared__ int data[12];
       __shared__ sad_t dataf[5];
 
@@ -941,7 +940,7 @@ kl_search(
         }
       }
 
-      // !!!!! ˆË‘¶ƒuƒƒbƒN‚ÌŒvZ‚ªI‚í‚é‚Ì‚ğ‘Ò‚Â !!!!!!
+      // !!!!! ä¾å­˜ãƒ–ãƒ­ãƒƒã‚¯ã®è¨ˆç®—ãŒçµ‚ã‚ã‚‹ã®ã‚’å¾…ã¤ !!!!!!
 #if ANALYZE_SYNC == 1
       if (tx == 0 && blkx > 0)
       {
@@ -966,19 +965,19 @@ kl_search(
         __shared__ volatile short pred[7][2]; // x, y
 
         if (tx < 6) {
-          // zero, global, predictor, predictors[1]`[3]‚ğæ“¾
+          // zero, global, predictor, predictors[1]ï½[3]ã‚’å–å¾—
           short2 vec = d.d.vectors[REF_VECTOR_INDEX[tx]];
           dev_clip_mv(vec, CLIP_RECT);
 
           if (CPU_EMU) {
-            // 3‚Ímedian‚È‚Ì‚Å‹ó‚¯‚éiCPU”Å‚Æ‡‚í‚¹‚éj
+            // 3ã¯medianãªã®ã§ç©ºã‘ã‚‹ï¼ˆCPUç‰ˆã¨åˆã‚ã›ã‚‹ï¼‰
             int dx = (tx < 3) ? tx : (tx + 1);
             pred[dx][0] = vec.x;
             pred[dx][1] = vec.y;
             // memfence
             if (tx < 2) {
               // Median predictor
-              // ŒvZŒø—¦‚ªˆ«‚¢‚Ì‚ÅÁ‚µ‚½‚¢EEE
+              // è¨ˆç®—åŠ¹ç‡ãŒæ‚ªã„ã®ã§æ¶ˆã—ãŸã„ãƒ»ãƒ»ãƒ»
               int a = pred[4][tx];
               int b = pred[5][tx];
               int c = pred[6][tx];
@@ -991,7 +990,7 @@ kl_search(
             // memfence
             if (tx < 2) {
               // Median predictor
-              // ŒvZŒø—¦‚ªˆ«‚¢‚Ì‚ÅÁ‚µ‚½‚¢EEE
+              // è¨ˆç®—åŠ¹ç‡ãŒæ‚ªã„ã®ã§æ¶ˆã—ãŸã„ãƒ»ãƒ»ãƒ»
               int a = pred[3][tx];
               int b = pred[4][tx];
               int c = pred[5][tx];
@@ -1016,8 +1015,8 @@ kl_search(
       //bool debug = (nBlkY == 10 && blkx == 1 && blky == 0);
       bool debug = false;
 
-      // ‚Ü‚¸‚Í7‰ÓŠ‚ğŒvZ
-      const unsigned int activemask = (BLK_SIZE >= WARP_SIZE) ? FULL_MASK : __ballot_sync(FULL_MASK, bx < 7); // BLK_SIZE >= WARP_SIZE ‚Ì‚Æ‚«ˆÈŠO‚Íwarp“à‚Åif•¶‚ÌŒ‹‰Ê‚ª•Ï‚í‚è‚¤‚é
+      // ã¾ãšã¯7ç®‡æ‰€ã‚’è¨ˆç®—
+      const unsigned int activemask = (BLK_SIZE >= WARP_SIZE) ? FULL_MASK : __ballot_sync(FULL_MASK, bx < 7); // BLK_SIZE >= WARP_SIZE ã®ã¨ãä»¥å¤–ã¯warpå†…ã§ifæ–‡ã®çµæœãŒå¤‰ã‚ã‚Šã†ã‚‹
       if (bx < 7) {
 #if 0
         if (wi == 0 && nBlkY == 10 && blkx == 1 && blky == 0) {
@@ -1069,14 +1068,14 @@ kl_search(
           }
 #endif
         }
-        // ‚Æ‚è‚ ‚¦‚¸”äŠr‚Ícost‚¾‚¯‚Å‚â‚é‚Ì‚ÅSAD‚Í—v‚ç‚È‚¢
-        // SAD‚Í’Tõ‚ªI‚í‚Á‚½‚çÄŒvZ‚·‚é
+        // ã¨ã‚Šã‚ãˆãšæ¯”è¼ƒã¯costã ã‘ã§ã‚„ã‚‹ã®ã§SADã¯è¦ã‚‰ãªã„
+        // SADã¯æ¢ç´¢ãŒçµ‚ã‚ã£ãŸã‚‰å†è¨ˆç®—ã™ã‚‹
       }
 
       __syncthreads();
 
-      // Œ‹‰ÊW–ñ
-      if (tx < 3) { // 7-4=3ƒXƒŒƒbƒh‚ÅŒÄ‚Ô
+      // çµæœé›†ç´„
+      if (tx < 3) { // 7-4=3ã‚¹ãƒ¬ãƒƒãƒ‰ã§å‘¼ã¶
         dev_reduce_result<7, CPU_EMU>(result, tx);
       }
 #if 0
@@ -1115,17 +1114,17 @@ kl_search(
 
 
       if (tx == 0) {
-        // Œ‹‰Ê‘‚«‚İ
+        // çµæœæ›¸ãè¾¼ã¿
         d.d.vectors[blky*nBlkX + blkx] = result[0].xy;
 
-        // Œ‹‰Ê‚Ì‘‚«‚İ‚ªI‚í‚é‚Ì‚ğ‘Ò‚Â
+        // çµæœã®æ›¸ãè¾¼ã¿ãŒçµ‚ã‚ã‚‹ã®ã‚’å¾…ã¤
         __threadfence();
 
-        // Š®—¹‚ğ‘‚«‚İ
+        // å®Œäº†ã‚’æ›¸ãè¾¼ã¿
         d.d.prog[blkx] = blky;
       }
 
-      // ‹¤—Lƒƒ‚ƒŠ•ÛŒì
+      // å…±æœ‰ãƒ¡ãƒ¢ãƒªä¿è­·
       __syncthreads();
     }
   }
@@ -1289,11 +1288,11 @@ __global__ void kl_prepare_search(
     int sad = sads[blkIdx];
     SearchBlock *data = &dst_blocks[blkIdx];
 
-    // i’»‚Í-1‚É‰Šú‰»‚µ‚Ä‚¨‚­
+    // é€²æ—ã¯-1ã«åˆæœŸåŒ–ã—ã¦ãŠã
     if (by == 0) {
       prog[bx] = -1;
 
-      // ƒJƒEƒ“ƒ^‚ğ0‚É‚µ‚Ä‚¨‚­
+      // ã‚«ã‚¦ãƒ³ã‚¿ã‚’0ã«ã—ã¦ãŠã
       if (bx == 0) {
         *next = 0;
       }
@@ -1314,7 +1313,7 @@ __global__ void kl_prepare_search(
     data->data[2] = nDxMin;
     data->data[3] = nDyMin;
 
-    int p1 = -2; // -2‚ÍzeroƒxƒNƒ^
+    int p1 = -2; // -2ã¯zeroãƒ™ã‚¯ã‚¿
                  // Left (or right) predictor
 #if ANALYZE_SYNC == 0
     if (bx > 0)
@@ -1340,7 +1339,7 @@ __global__ void kl_prepare_search(
       p2 = blkIdx - nBlkX;
     }
     else {
-      // median‚Åleft‚ğ‘I‚Î‚¹‚é‚½‚ß
+      // medianã§leftã‚’é¸ã°ã›ã‚‹ãŸã‚
       p2 = p1;
     }
 
@@ -1348,9 +1347,9 @@ __global__ void kl_prepare_search(
     // bottom-right pridictor (from coarse level)
     if ((by < nBlkY - 1) && (bx < nBlkX - 1))
     {
-      // ‚·‚Å‚É‘‚«Š·‚í‚Á‚Ä‚¢‚é‰Â”\«‚ª‚ ‚è‚»‚ê‚Å‚àŒvZ‚Í‰Â”\‚¾‚ªA
-      // ƒfƒoƒbƒO‚Ì‚½‚ß”ñŒˆ’è“®ì‚Í”ğ‚¯‚½‚¢‚Ì‚Å
-      // ƒRƒs[‚µ‚Ä‚ ‚éŒã‚ë‚Ìƒf[ƒ^‚ğg‚¤
+      // ã™ã§ã«æ›¸ãæ›ã‚ã£ã¦ã„ã‚‹å¯èƒ½æ€§ãŒã‚ã‚Šãã‚Œã§ã‚‚è¨ˆç®—ã¯å¯èƒ½ã ãŒã€
+      // ãƒ‡ãƒãƒƒã‚°ã®ãŸã‚éæ±ºå®šå‹•ä½œã¯é¿ã‘ãŸã„ã®ã§
+      // ã‚³ãƒ”ãƒ¼ã—ã¦ã‚ã‚‹å¾Œã‚ã®ãƒ‡ãƒ¼ã‚¿ã‚’ä½¿ã†
       p3 = blkIdx + nBlkX + 1 + nBlkX * nBlkY;
     }
 
@@ -1363,7 +1362,7 @@ __global__ void kl_prepare_search(
 
     short2 pred = vectors[blkIdx];
 
-    // ŒvZ’†‚É‘O‚ÌƒŒƒxƒ‹‚©‚ç‹‚ß‚½ƒxƒNƒ^‚ğ•Û‚µ‚½‚¢‚Ì‚ÅƒRƒs[‚µ‚Ä‚¨‚­
+    // è¨ˆç®—ä¸­ã«å‰ã®ãƒ¬ãƒ™ãƒ«ã‹ã‚‰æ±‚ã‚ãŸãƒ™ã‚¯ã‚¿ã‚’ä¿æŒã—ãŸã„ã®ã§ã‚³ãƒ”ãƒ¼ã—ã¦ãŠã
     vectors_copy[blkIdx] = pred;
 
     data->data[10] = pred.x;
@@ -1385,7 +1384,7 @@ __global__ void kl_most_freq_mv(const short2* vectors, int vectorsPitch, int nVe
 {
   enum {
     DIMX = 1024,
-    // level==1‚ªÅ‘å‚È‚Ì‚ÅA‚±‚ÌƒTƒCƒY‚Å8K‚­‚ç‚¢‚Ü‚Å‘Î‰
+    // level==1ãŒæœ€å¤§ãªã®ã§ã€ã“ã®ã‚µã‚¤ã‚ºã§8Kãã‚‰ã„ã¾ã§å¯¾å¿œ
     FREQ_SIZE = DIMX * 8,
     HALF_SIZE = FREQ_SIZE / 2
   };
@@ -1575,7 +1574,7 @@ __global__ void kl_interpolate_prediction(
   int y = threadIdx.y + blockIdx.y * blockDim.y;
   int batchid = blockIdx.z;
 
-  // ƒoƒbƒ`•ªi‚ß‚é
+  // ãƒãƒƒãƒåˆ†é€²ã‚ã‚‹
   src_vector += batchid * srcVectorPitcch;
   dst_vector += batchid * dstVectorPitch;
   src_sad += batchid * srcSadPitch;
@@ -1758,13 +1757,13 @@ __global__ void kl_init_const_vec(short2* vectors, int vectorsPitch, const short
 // DEGRAIN
 /////////////////////////////////////////////////////////////////////////////
 
-// ƒXƒŒƒbƒh”: sceneChange‚Ì”
+// ã‚¹ãƒ¬ãƒƒãƒ‰æ•°: sceneChangeã®æ•°
 __global__ void kl_init_scene_change(int* sceneChange)
 {
   sceneChange[threadIdx.x] = 0;
 }
 
-// ƒXƒŒƒbƒh”: 256i‡Œv: nBlksj
+// ã‚¹ãƒ¬ãƒƒãƒ‰æ•°: 256ï¼ˆåˆè¨ˆ: nBlksï¼‰
 __global__ void kl_scene_change(const VECTOR* mv, int nBlks, int nTh1, int* sceneChange)
 {
   enum {
@@ -1787,7 +1786,7 @@ __global__ void kl_scene_change(const VECTOR* mv, int nBlks, int nTh1, int* scen
   }
 }
 
-// ƒXƒŒƒbƒh”: 256i‡Œv: nBlksj
+// ã‚¹ãƒ¬ãƒƒãƒ‰æ•°: 256ï¼ˆåˆè¨ˆ: nBlksï¼‰
 __global__ void kl_scene_change_x2(const VECTOR* mv0, const VECTOR* mv1, int nBlks, int nTh1, int* sceneChange0, int* sceneChange1)
 {
     enum {
@@ -1853,7 +1852,7 @@ static __device__ int dev_degrain_weight(int thSAD, int blockSAD)
   return (int)(256.0f*(sq_thSAD - sq_blockSAD) / (sq_thSAD + sq_blockSAD));
 }
 
-// binomial‘Î‰‚Í4‚Ü‚Åi‚»‚êˆÈ~‚ÍŠO‘¤‚Ìd‚İ‚ª0‚É‚È‚é‚Ì‚ÅˆÓ–¡‚ª‚È‚¢j
+// binomialå¯¾å¿œã¯4ã¾ã§ï¼ˆãã‚Œä»¥é™ã¯å¤–å´ã®é‡ã¿ãŒ0ã«ãªã‚‹ã®ã§æ„å‘³ãŒãªã„ï¼‰
 template<int delta, bool binomial>
 static __device__ void dev_norm_weights(int &WSrc, int *WRefB, int *WRefF)
 {
@@ -1988,8 +1987,8 @@ static __global__ void kl_prepare_degrain(
 #endif
       }
       else {
-        // ‚±‚±‚©‚ç“Ç‚İæ‚ç‚ê‚é’l‚Íg‚í‚ê‚È‚¢‚Ì‚Å“Ç‚İæ‚ê‚é“K“–‚ÈƒAƒhƒŒƒX‚ğ“ü‚ê‚é
-        //iƒsƒbƒ`‚ªSuper‚Æˆá‚¤‚Ì‚Å‚¿‚á‚ñ‚Æ‚µ‚½offset‚ğ“ü‚ê‚Ä‚à‚¿‚á‚ñ‚Æ‚µ‚½‰æ‘œ‚Í“Ç‚İæ‚ê‚È‚¢‚±‚Æ‚É’ˆÓj
+        // ã“ã“ã‹ã‚‰èª­ã¿å–ã‚‰ã‚Œã‚‹å€¤ã¯ä½¿ã‚ã‚Œãªã„ã®ã§èª­ã¿å–ã‚Œã‚‹é©å½“ãªã‚¢ãƒ‰ãƒ¬ã‚¹ã‚’å…¥ã‚Œã‚‹
+        //ï¼ˆãƒ”ãƒƒãƒãŒSuperã¨é•ã†ã®ã§ã¡ã‚ƒã‚“ã¨ã—ãŸoffsetã‚’å…¥ã‚Œã¦ã‚‚ã¡ã‚ƒã‚“ã¨ã—ãŸç”»åƒã¯èª­ã¿å–ã‚Œãªã„ã“ã¨ã«æ³¨æ„ï¼‰
         b.pB[i] = arg.pSrc;
         WRefB[i] = 0;
       }
@@ -2000,7 +1999,7 @@ static __global__ void kl_prepare_degrain(
         WRefF[i] = dev_degrain_weight(thSAD, arg.mvF[i][idx].sad);
       }
       else {
-        // ‚±‚±‚©‚ç“Ç‚İæ‚ç‚ê‚é’l‚Íg‚í‚ê‚È‚¢‚Ì‚Å“Ç‚İæ‚ê‚é“K“–‚ÈƒAƒhƒŒƒX‚ğ“ü‚ê‚é
+        // ã“ã“ã‹ã‚‰èª­ã¿å–ã‚‰ã‚Œã‚‹å€¤ã¯ä½¿ã‚ã‚Œãªã„ã®ã§èª­ã¿å–ã‚Œã‚‹é©å½“ãªã‚¢ãƒ‰ãƒ¬ã‚¹ã‚’å…¥ã‚Œã‚‹
         b.pF[i] = arg.pSrc;
         WRefF[i] = 0;
       }
@@ -2017,7 +2016,7 @@ static __global__ void kl_prepare_degrain(
   }
 }
 
-// ƒuƒƒbƒN‚Í2x3‘O’ñ
+// ãƒ–ãƒ­ãƒƒã‚¯ã¯2x3å‰æ
 template <typename pixel_t, typename vpixel_t, typename vtmp_t, typename vint_t, typename vshort_t, int N, int BLK_SIZE, int M>
 static __global__ void kl_degrain_2x3(
   int nPatternX, int nPatternY,
@@ -2050,7 +2049,7 @@ static __global__ void kl_degrain_2x3(
   __shared__ DegrainBlock<pixel_t, N> info_[M];
   DegrainBlock<pixel_t, N>& info = info_[tz];
 
-  // tmp‰Šú‰»
+  // tmpåˆæœŸåŒ–
   tmp[tz][ty][tx] = VHelper<vtmp_t>::make(0);
   tmp[tz][ty][tx + BLK_SIZE4] = VHelper<vtmp_t>::make(0);
   if (ty < BLK_STEP) {
@@ -2069,22 +2068,22 @@ static __global__ void kl_degrain_2x3(
 
   for (int bby = 0; bby < SPAN_Y; ++bby) {
     int by = basey + bby;
-    // by‚ÍCUDAƒuƒƒbƒN“à‚Ì‘SƒXƒŒƒbƒh‚ª“¯‚¶’l‚È‚Ì‚Å‚±‚ê‚ÅOK
+    // byã¯CUDAãƒ–ãƒ­ãƒƒã‚¯å†…ã®å…¨ã‚¹ãƒ¬ãƒƒãƒ‰ãŒåŒã˜å€¤ãªã®ã§ã“ã‚Œã§OK
     if (by >= nBlkY) break;
 
     for (int bbx = 0; bbx < SPAN_X; ++bbx) {
       int bx = basex + bbx;
 
       if (M == 1) {
-        // M==1‚Ìê‡‚Íbx‚ÍCUDAƒuƒƒbƒN“à‚Ì‘SƒXƒŒƒbƒh‚ª“¯‚¶’l‚È‚Ì‚Å‚±‚ê‚ÅOK
+        // M==1ã®å ´åˆã¯bxã¯CUDAãƒ–ãƒ­ãƒƒã‚¯å†…ã®å…¨ã‚¹ãƒ¬ãƒƒãƒ‰ãŒåŒã˜å€¤ãªã®ã§ã“ã‚Œã§OK
         if (bx >= nBlkX) break;
       }
 
       int blkidx = bx + by * nBlkX;
 
-      // M == 1‚Ì‚Æ‚«‚ÍğŒ•ªŠò‚ğÈ—ª
+      // M == 1ã®ã¨ãã¯æ¡ä»¶åˆ†å²ã‚’çœç•¥
       if (M == 1 || bx < nBlkX) {
-        // ƒuƒƒbƒNî•ñ‚ğ“Ç‚İ‚Ş
+        // ãƒ–ãƒ­ãƒƒã‚¯æƒ…å ±ã‚’èª­ã¿è¾¼ã‚€
         for (int i = 0; i < N_READ_LOOP; ++i) {
           info.m[i * THREADS + tid] = data[blkidx].m[i * THREADS + tid];
         }
@@ -2129,7 +2128,7 @@ static __global__ void kl_degrain_2x3(
   }
 }
 
-  // dst‚É‘‚«‚Ş
+  // dstã«æ›¸ãè¾¼ã‚€
   vtmp_t *p = &pDst[basex * BLK_STEP4 + tx + (basey * BLK_STEP + ty) * pitch4];
 #if 0
   if (basex == 0 && basey == 0 && tx == 0 && ty == 0) {
@@ -2228,14 +2227,14 @@ static __global__ void kl_prepare_compensate(
       }
     }
     else {
-      // ƒV[ƒ“ƒ`ƒFƒ“ƒW
+      // ã‚·ãƒ¼ãƒ³ãƒã‚§ãƒ³ã‚¸
       b.winOver = nullptr;
       b.pRef = nullptr;
     }
   }
 }
 
-// ƒuƒƒbƒN‚Í2x3‘O’ñ
+// ãƒ–ãƒ­ãƒƒã‚¯ã¯2x3å‰æ
 template <typename pixel_t, typename vtmp_t, typename vint_t, typename vshort_t, int BLK_SIZE, int M>
 static __global__ void kl_compensate_2x3(
   int nPatternX, int nPatternY, int nBlkX, int nBlkY,
@@ -2269,7 +2268,7 @@ static __global__ void kl_compensate_2x3(
   __shared__ bool isCopySrc;
   CompensateBlock<pixel_t>& info = info_[tz];
 
-  // tmp‰Šú‰»
+  // tmpåˆæœŸåŒ–
   tmp[tz][ty][tx] = VHelper<vtmp_t>::make(0);
   tmp[tz][ty][tx + BLK_SIZE4] = VHelper<vtmp_t>::make(0);
   if (ty < BLK_STEP) {
@@ -2284,7 +2283,7 @@ static __global__ void kl_compensate_2x3(
   __syncthreads();
 
   if (isCopySrc) {
-    // ƒV[ƒ“ƒ`ƒFƒ“ƒW‚Í‚±‚±‚Å‚Íˆ—‚µ‚È‚¢
+    // ã‚·ãƒ¼ãƒ³ãƒã‚§ãƒ³ã‚¸æ™‚ã¯ã“ã“ã§ã¯å‡¦ç†ã—ãªã„
     return;
   }
 
@@ -2296,22 +2295,22 @@ static __global__ void kl_compensate_2x3(
 
   for (int bby = 0; bby < SPAN_Y; ++bby) {
     int by = basey + bby;
-    // by‚ÍCUDAƒuƒƒbƒN“à‚Ì‘SƒXƒŒƒbƒh‚ª“¯‚¶’l‚È‚Ì‚Å‚±‚ê‚ÅOK
+    // byã¯CUDAãƒ–ãƒ­ãƒƒã‚¯å†…ã®å…¨ã‚¹ãƒ¬ãƒƒãƒ‰ãŒåŒã˜å€¤ãªã®ã§ã“ã‚Œã§OK
     if (by >= nBlkY) break;
 
     for (int bbx = 0; bbx < SPAN_X; ++bbx) {
       int bx = basex + bbx;
 
       if (M == 1) {
-        // M==1‚Ìê‡‚Íbx‚ÍCUDAƒuƒƒbƒN“à‚Ì‘SƒXƒŒƒbƒh‚ª“¯‚¶’l‚È‚Ì‚Å‚±‚ê‚ÅOK
+        // M==1ã®å ´åˆã¯bxã¯CUDAãƒ–ãƒ­ãƒƒã‚¯å†…ã®å…¨ã‚¹ãƒ¬ãƒƒãƒ‰ãŒåŒã˜å€¤ãªã®ã§ã“ã‚Œã§OK
         if (bx >= nBlkX) break;
       }
 
       int blkidx = bx + by * nBlkX;
 
-      // M == 1‚Ì‚Æ‚«‚ÍğŒ•ªŠò‚ğÈ—ª
+      // M == 1ã®ã¨ãã¯æ¡ä»¶åˆ†å²ã‚’çœç•¥
       if (M == 1 || bx < nBlkX) {
-        // ƒuƒƒbƒNî•ñ‚ğ“Ç‚İ‚Ş
+        // ãƒ–ãƒ­ãƒƒã‚¯æƒ…å ±ã‚’èª­ã¿è¾¼ã‚€
         for (int i = 0; i < N_READ_LOOP; ++i) {
           info.m[i * THREADS + tid] = data[blkidx].m[i * THREADS + tid];
         }
@@ -2343,7 +2342,7 @@ static __global__ void kl_compensate_2x3(
   }
 }
 
-  // dst‚É‘‚«‚Ş
+  // dstã«æ›¸ãè¾¼ã‚€
   vtmp_t *p = &pDst[basex * BLK_STEP4 + tx + (basey * BLK_STEP + ty) * pitch4];
 #if 0
   if (basex == 0 && basey == 0 && tx == 0 && ty == 0) {
@@ -2383,7 +2382,7 @@ __global__ void kl_short_to_byte_or_copy_src(
       dst[x + y * pitch4] = VHelper<vpixel_t>::cast_to(v);
     }
     else {
-      // ƒV[ƒ“ƒ`ƒFƒ“ƒW‚È‚çƒ\[ƒX‚ğƒRƒs[
+      // ã‚·ãƒ¼ãƒ³ãƒã‚§ãƒ³ã‚¸ãªã‚‰ã‚½ãƒ¼ã‚¹ã‚’ã‚³ãƒ”ãƒ¼
       dst[x + y * pitch4] = src[x + y * pitch4];
     }
   }
@@ -2444,14 +2443,14 @@ public:
 
   void PadFrame(pixel_t *ptr, int pitch, int hPad, int vPad, int width, int height)
   {
-    { // H•ûŒü
+    { // Hæ–¹å‘
       dim3 threads(hPad, 32);
       dim3 blocks(2, nblocks(height, threads.y));
       kl_pad_frame_h<pixel_t> << <blocks, threads, 0, stream >> > (
         ptr + vPad * pitch, pitch, hPad, width, height);
       DEBUG_SYNC;
     }
-    { // V•ûŒüi‚·‚Å‚ÉPad‚³‚ê‚½H•ûŒü•ª‚àŠÜ‚Şj
+    { // Væ–¹å‘ï¼ˆã™ã§ã«Padã•ã‚ŒãŸHæ–¹å‘åˆ†ã‚‚å«ã‚€ï¼‰
       dim3 threads(32, vPad);
       dim3 blocks(nblocks(width + hPad * 2, threads.x), 2);
       kl_pad_frame_v<pixel_t> << <blocks, threads, 0, stream >> > (
@@ -2529,7 +2528,7 @@ public:
   {
     static_assert(SearchBatchData<pixel_t>::LEN <= BLK_SIZE * 8);
     dim3 threads(BLK_SIZE * 8);
-    // —]•ª‚ÈƒuƒƒbƒN‚Íd–‚¹‚¸‚ÉI—¹‚·‚é‚Ì‚Å–â‘è‚È‚¢
+    // ä½™åˆ†ãªãƒ–ãƒ­ãƒƒã‚¯ã¯ä»•äº‹ã›ãšã«çµ‚äº†ã™ã‚‹ã®ã§å•é¡Œãªã„
     dim3 blocks(batch, std::min(nBlkX, nBlkY));
     kl_search<pixel_t, BLK_SIZE, SEARCH, NPEL, CHROMA, CPU_EMU> << <blocks, threads, 0, stream >> > (
       pdata, nBlkX, nBlkY, nPad,
@@ -2622,7 +2621,7 @@ public:
     int fidx = ((nBlkSize == 8) ? 0 : (nBlkSize == 16) ? 4 : 8) + ((nPel == 1) ? 0 : 2) + (chroma ? 0 : 1);
 
     { // search
-      // ƒfƒoƒbƒO—p
+      // ãƒ‡ãƒãƒƒã‚°ç”¨
 #define CPU_EMU true
       LAUNCH_SEARCH table[2][12] =
       {
@@ -2657,7 +2656,7 @@ public:
       };
 #undef CPU_EMU
 
-      // ƒpƒ‰ƒ[ƒ^‚ğì‚é
+      // ãƒ‘ãƒ©ãƒ¡ãƒ¼ã‚¿ã‚’ä½œã‚‹
       for (int i = 0; i < batch; ++i) {
         hsearchbatch[i].d.out = out[i];
         hsearchbatch[i].d.blocks = searchblocks + nBlkX * nBlkY * i;
@@ -2675,7 +2674,7 @@ public:
 
       CUDA_CHECK(cudaMemcpyAsync(searchbatch, hsearchbatch, sizeof(searchbatch[0]) * batch, cudaMemcpyHostToDevice, stream));
 
-      // I‚í‚Á‚½‚ç‰ğ•ú‚·‚éƒR[ƒ‹ƒoƒbƒN‚ğ’Ç‰Á
+      // çµ‚ã‚ã£ãŸã‚‰è§£æ”¾ã™ã‚‹ã‚³ãƒ¼ãƒ«ãƒãƒƒã‚¯ã‚’è¿½åŠ 
       env->DeviceAddCallback([](void* arg) {
         delete[]((SearchBatchData<pixel_t>*)arg);
       }, hsearchbatch);
@@ -2708,7 +2707,7 @@ public:
         &Me::launch_calc_all_sad<32, 2, false>,
       };
 #if 0
-      // calc_all_sad‚Í\•ª‚È•À—ñ«‚ª‚ ‚é‚Ì‚Åƒoƒbƒ`•ª‚Íƒ‹[ƒv‚Å‰ñ‚·
+      // calc_all_sadã¯ååˆ†ãªä¸¦åˆ—æ€§ãŒã‚ã‚‹ã®ã§ãƒãƒƒãƒåˆ†ã¯ãƒ«ãƒ¼ãƒ—ã§å›ã™
       for (int i = 0; i < batch; ++i) {
         (this->*table[fidx])(nBlkX, nBlkY,
           vectors + vectorsPitch * i, sads + sadPitch * i, nPad,
@@ -2764,7 +2763,7 @@ public:
       LoadMVBatchData<pixel_t>* loadmvbatch = (LoadMVBatchData<pixel_t>*)_loadmvbatch;
       LoadMVBatchData<pixel_t>* hloadmvbatch = new LoadMVBatchData<pixel_t>[batch];
 
-      // ƒpƒ‰ƒ[ƒ^‚ğì‚é
+      // ãƒ‘ãƒ©ãƒ¡ãƒ¼ã‚¿ã‚’ä½œã‚‹
       for (int i = 0; i < batch; i++) {
           hloadmvbatch[i].d.src = src[i];
           hloadmvbatch[i].d.out = out[i];
@@ -2774,7 +2773,7 @@ public:
 
       CUDA_CHECK(cudaMemcpyAsync(loadmvbatch, hloadmvbatch, sizeof(loadmvbatch[0]) * batch, cudaMemcpyHostToDevice, stream));
 
-      //I‚í‚Á‚½‚ç‰ğ•ú‚·‚éƒR[ƒ‹ƒoƒbƒN‚ğ’Ç‰Á
+      //çµ‚ã‚ã£ãŸã‚‰è§£æ”¾ã™ã‚‹ã‚³ãƒ¼ãƒ«ãƒãƒƒã‚¯ã‚’è¿½åŠ 
       env->DeviceAddCallback([](void* arg) {
           delete[]((LoadMVBatchData<pixel_t>*)arg);
           }, hloadmvbatch);
@@ -2892,7 +2891,7 @@ public:
     void** _degrainblocks, void* _degraindarg, int *sceneChangeB, int *sceneChangeF, IMVCUDA *cuda
     );
 
-  // pTmp‚ÍpSrc‚Æ“¯‚¶pitch‚Å‚ ‚é‚±‚Æ
+  // pTmpã¯pSrcã¨åŒã˜pitchã§ã‚ã‚‹ã“ã¨
   template <int N>
   void DegrainN(
     int nWidth, int nHeight,
@@ -2911,7 +2910,7 @@ public:
     int nWidth_B = nBlkX*(nBlkSize - nOverlap) + nOverlap;
     int nHeight_B = nBlkY*(nBlkSize - nOverlap) + nOverlap;
 
-    // degrainargì¬
+    // degrainargä½œæˆ
     DegrainArg<pixel_t, N> *hargs = new DegrainArg<pixel_t, N>[3];
     DegrainArg<pixel_t, N> *dargs = (DegrainArg<pixel_t, N>*)_degraindarg;
 
@@ -2936,7 +2935,7 @@ public:
 
     CUDA_CHECK(cudaMemcpyAsync(dargs, hargs, sizeof(hargs[0]) * 3, cudaMemcpyHostToDevice, stream));
 
-    //I‚í‚Á‚½‚ç‰ğ•ú‚·‚éƒR[ƒ‹ƒoƒbƒN‚ğ’Ç‰Á
+    //çµ‚ã‚ã£ãŸã‚‰è§£æ”¾ã™ã‚‹ã‚³ãƒ¼ãƒ«ãƒãƒƒã‚¯ã‚’è¿½åŠ 
     env->DeviceAddCallback([](void* arg) {
       delete[]((DegrainArg<pixel_t, N>*)arg);
     }, hargs);
@@ -2974,14 +2973,14 @@ public:
       }
       break;
     default:
-      env->ThrowError("[Degrain] –¢‘Î‰Pel");
+      env->ThrowError("[Degrain] æœªå¯¾å¿œPel");
     }
 
     DegrainBlock<pixel_t, N>** degrainblocks = (DegrainBlock<pixel_t, N>**)_degrainblocks;
     const int max_pixel_value = (1 << nBitsPerPixel) - 1;
 
     auto planeEvent = cuda->CreateEventPlanes();
-    // YUVƒ‹[ƒv
+    // YUVãƒ«ãƒ¼ãƒ—
     for (int p = 0; p < 3; ++p) {
       const auto planeStream = (cudaStream_t)cuda->GetDeviceStreamPlane(p);
       PREPARE prepare = (p == 0) ? prepare_func : prepareuv_func;
@@ -3001,7 +3000,7 @@ public:
 
       if (enableYUV[p]) {
 
-        // DegrainBlockDataì¬
+        // DegrainBlockDataä½œæˆ
         (this->*prepare)(
           nBlkX, nBlkY, nPad >> shift, blksize, nTh2,
           (p == 0) ? thSAD : thSADC,
@@ -3009,7 +3008,7 @@ public:
           sceneChangeB, sceneChangeF, &dargs[p],
           degrainblocks[p], pitch, pitchsuper, imgpitch, planeStream);
 
-        // pTmp‰Šú‰»
+        // pTmpåˆæœŸåŒ–
         launch_elementwise<vtmp_t, SetZeroFunction<vtmp_t>>(
           (vtmp_t*)pTmp[p], width_b4, height_b, pitch4, planeStream);
         DEBUG_SYNC;
@@ -3042,16 +3041,16 @@ public:
           degrain_func = &Me::launch_degrain_2x3<N, 32, 1>; // 32x8x1 = 256threads
           break;
         default:
-          env->ThrowError("[Degrain] –¢‘Î‰ƒuƒƒbƒNƒTƒCƒY");
+          env->ThrowError("[Degrain] æœªå¯¾å¿œãƒ–ãƒ­ãƒƒã‚¯ã‚µã‚¤ã‚º");
         }
 
-        // 4‰ñƒJ[ƒlƒ‹ŒÄ‚Ño‚µ
+        // 4å›ã‚«ãƒ¼ãƒãƒ«å‘¼ã³å‡ºã—
         (this->*degrain_func)(0, 0, nBlkX, nBlkY, degrainblocks[p], pTmp[p], pitchX, pitchsuperX, planeStream);
         (this->*degrain_func)(1, 0, nBlkX, nBlkY, degrainblocks[p], pTmp[p], pitchX, pitchsuperX, planeStream);
         (this->*degrain_func)(0, 1, nBlkX, nBlkY, degrainblocks[p], pTmp[p], pitchX, pitchsuperX, planeStream);
         (this->*degrain_func)(1, 1, nBlkX, nBlkY, degrainblocks[p], pTmp[p], pitchX, pitchsuperX, planeStream);
 
-        // tmp_t -> pixel_t •ÏŠ·
+        // tmp_t -> pixel_t å¤‰æ›
         launch_short_to_byte<vpixel_t, vtmp_t>(
           (vpixel_t*)pDst[p], (const vtmp_t*)pTmp[p], width_b4, height_b, pitch4, max_pixel_value, planeStream);
 
@@ -3061,7 +3060,7 @@ public:
         dtmp.Show();
 #endif
 
-        // right non-covered region‚ğsrc‚©‚çƒRƒs[
+        // right non-covered regionã‚’srcã‹ã‚‰ã‚³ãƒ”ãƒ¼
         if (nWidth_B < nWidth) {
           launch_elementwise<vpixel_t, vpixel_t, CopyFunction<vpixel_t>>(
             (vpixel_t*)(pDst[p] + (nWidth_B >> shift)),
@@ -3069,7 +3068,7 @@ public:
             ((nWidth - nWidth_B) >> shift) / 4, nBlkY * blksize, pitch4, planeStream);
         }
 
-        // bottom uncovered region‚ğsrc‚©‚çƒRƒs[
+        // bottom uncovered regionã‚’srcã‹ã‚‰ã‚³ãƒ”ãƒ¼
         if (nHeight_B < nHeight) {
           launch_elementwise<vpixel_t, vpixel_t, CopyFunction<vpixel_t>>(
             (vpixel_t*)(pDst[p] + (nHeight_B >> shift) * pitch),
@@ -3078,7 +3077,7 @@ public:
         }
       }
       else {
-        // src‚©‚çƒRƒs[
+        // srcã‹ã‚‰ã‚³ãƒ”ãƒ¼
         launch_elementwise<vpixel_t, vpixel_t, CopyFunction<vpixel_t>>(
           (vpixel_t*)pDst[p], (const vpixel_t*)pSrc[p], width4, height, pitch4, planeStream);
       }
@@ -3101,7 +3100,7 @@ public:
     int numRef = N * 2;
     int numBlks = nBlkX * nBlkY;
 
-    // SceneChangeŒŸo
+    // SceneChangeæ¤œå‡º
     int *sceneChangeB = sceneChange;
     int *sceneChangeF = sceneChange + N;
 
@@ -3138,7 +3137,7 @@ public:
       degrain = &Me::DegrainN<2>;
       break;
     default:
-      env->ThrowError("[Degrain] –¢‘Î‰N‚Å‚·");
+      env->ThrowError("[Degrain] æœªå¯¾å¿œNã§ã™");
     }
 
     (this->*degrain)(
@@ -3225,7 +3224,7 @@ public:
   {
     int numBlks = nBlkX * nBlkY;
 
-    // SceneChangeŒŸo
+    // SceneChangeæ¤œå‡º
     kl_init_scene_change << <1, 1, 0, stream >> > (sceneChange);
     DEBUG_SYNC;
     {
@@ -3261,7 +3260,7 @@ public:
       prepareuv_func = &Me::launch_prepare_compensate<2, 1>;
       break;
     default:
-      env->ThrowError("[Compensate] –¢‘Î‰Pel");
+      env->ThrowError("[Compensate] æœªå¯¾å¿œPel");
     }
 
     CompensateBlock<pixel_t>** compensateblocks = (CompensateBlock<pixel_t>**)_compensateblock;
@@ -3269,7 +3268,7 @@ public:
 
     auto planeEvent = cuda->CreateEventPlanes();
 
-    // YUVƒ‹[ƒv
+    // YUVãƒ«ãƒ¼ãƒ—
     for (int p = 0; p < 3; ++p) {
 
       const auto planeStream = (cudaStream_t)cuda->GetDeviceStreamPlane(p);
@@ -3288,14 +3287,14 @@ public:
       int pitchsuper4 = pitchsuper / 4;
       int imgpitch = (p == 0) ? nImgPitchY : nImgPitchUV;
 
-      // DegrainBlockDataì¬
+      // DegrainBlockDataä½œæˆ
       (this->*prepare)(
         nBlkX, nBlkY, nPad >> shift, blksize, nTh2, time256, thSAD,
         (p == 0) ? ovrwins : overwinsUV,
         sceneChange, mv, pRef[0 + p], pRef[3 + p],
         compensateblocks[p], pitchsuper, imgpitch, planeStream);
 
-      // pTmp‰Šú‰»
+      // pTmpåˆæœŸåŒ–
       launch_elementwise<vtmp_t, SetZeroFunction<vtmp_t>>(
         (vtmp_t*)pTmp[p], width_b4, height_b, pitch4, planeStream);
       DEBUG_SYNC;
@@ -3328,16 +3327,16 @@ public:
         compensate_func = &Me::launch_compensate_2x3<32, 1>; // 32x8x1 = 256threads
         break;
       default:
-        env->ThrowError("–¢‘Î‰ƒuƒƒbƒNƒTƒCƒY");
+        env->ThrowError("æœªå¯¾å¿œãƒ–ãƒ­ãƒƒã‚¯ã‚µã‚¤ã‚º");
       }
 
-      // 4‰ñƒJ[ƒlƒ‹ŒÄ‚Ño‚µ
+      // 4å›ã‚«ãƒ¼ãƒãƒ«å‘¼ã³å‡ºã—
       (this->*compensate_func)(0, 0, nBlkX, nBlkY, compensateblocks[p], pTmp[p], pitchX, pitchsuperX, planeStream);
       (this->*compensate_func)(1, 0, nBlkX, nBlkY, compensateblocks[p], pTmp[p], pitchX, pitchsuperX, planeStream);
       (this->*compensate_func)(0, 1, nBlkX, nBlkY, compensateblocks[p], pTmp[p], pitchX, pitchsuperX, planeStream);
       (this->*compensate_func)(1, 1, nBlkX, nBlkY, compensateblocks[p], pTmp[p], pitchX, pitchsuperX, planeStream);
 
-      // tmp_t -> pixel_t •ÏŠ·
+      // tmp_t -> pixel_t å¤‰æ›
       launch_short_to_byte_or_copy_src(
         (const void**)&compensateblocks[p][0].d.winOver,
         (vpixel_t*)pDst[p], (const vpixel_t*)pSrc[p], (const vtmp_t*)pTmp[p], width_b4, height_b, pitch4, max_pixel_value, planeStream);
@@ -3348,7 +3347,7 @@ public:
       dtmp.Show();
 #endif
 
-      // right non-covered region‚ğsrc‚©‚çƒRƒs[
+      // right non-covered regionã‚’srcã‹ã‚‰ã‚³ãƒ”ãƒ¼
       if (nWidth_B < nWidth) {
         launch_elementwise<vpixel_t, vpixel_t, CopyFunction<vpixel_t>>(
           (vpixel_t*)(pDst[p] + (nWidth_B >> shift)),
@@ -3356,7 +3355,7 @@ public:
           ((nWidth - nWidth_B) >> shift) / 4, nBlkY * blksize, pitch4, planeStream);
       }
 
-      // bottom uncovered region‚ğsrc‚©‚çƒRƒs[
+      // bottom uncovered regionã‚’srcã‹ã‚‰ã‚³ãƒ”ãƒ¼
       if (nHeight_B < nHeight) {
         launch_elementwise<vpixel_t, vpixel_t, CopyFunction<vpixel_t>>(
           (vpixel_t*)(pDst[p] + (nHeight_B >> shift) * pitch),
@@ -3415,7 +3414,7 @@ CudaPlaneEventsPool::~CudaPlaneEventsPool() { }
 
 cudaEventPlanes *CudaPlaneEventsPool::PlaneStreamStart(cudaStream_t sMain, cudaStream_t sU, cudaStream_t sV) {
     cudaEventPlanes *ptr = nullptr;
-    // events ‚Ì’†g‚ğæ“ª‚©‚çŒ©‚ÄAcudaEventQuery‚ÅcudaSuccess‚ğ•Ô‚é‚à‚Ì‚ª‚ ‚ê‚ÎA‚»‚ê‚ğ––”ö‚ÉˆÚ“®‚·‚é
+    // events ã®ä¸­èº«ã‚’å…ˆé ­ã‹ã‚‰è¦‹ã¦ã€cudaEventQueryã§cudaSuccessã‚’è¿”ã‚‹ã‚‚ã®ãŒã‚ã‚Œã°ã€ãã‚Œã‚’æœ«å°¾ã«ç§»å‹•ã™ã‚‹
     auto it = events.begin();
     if (it != events.end()) {
         if ((*it)->planeUFin() && (*it)->planeVFin()) {

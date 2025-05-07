@@ -11,6 +11,8 @@
 #include "Copy.h"
 #include "VectorFunctions.cuh"
 #include "KFMFilterBase.cuh"
+#include "KUtil.h"
+#include "rgy_simd.h"
 
 struct QPClipInfo {
     enum
@@ -100,25 +102,13 @@ struct CPUInfo {
     bool initialized, avx, avx2;
 };
 
-static CPUInfo g_cpuinfo;
+static CPUInfo g_cpuinfo = { false, false, false };
 
 static inline void InitCPUInfo() {
     if (g_cpuinfo.initialized == false) {
-        int cpuinfo[4];
-        __cpuid(cpuinfo, 1);
-        g_cpuinfo.avx = cpuinfo[2] & (1 << 28) || false;
-        bool osxsaveSupported = cpuinfo[2] & (1 << 27) || false;
-        g_cpuinfo.avx2 = false;
-        if (osxsaveSupported && g_cpuinfo.avx)
-        {
-            // _XCR_XFEATURE_ENABLED_MASK = 0
-            unsigned long long xcrFeatureMask = _xgetbv(0);
-            g_cpuinfo.avx = (xcrFeatureMask & 0x6) == 0x6;
-            if (g_cpuinfo.avx) {
-                __cpuid(cpuinfo, 7);
-                g_cpuinfo.avx2 = cpuinfo[1] & (1 << 5) || false;
-            }
-        }
+        auto simd = get_availableSIMD();
+        g_cpuinfo.avx = ((std::underlying_type_t<RGY_SIMD>)simd & (std::underlying_type_t<RGY_SIMD>)RGY_SIMD::AVX) != (std::underlying_type_t<RGY_SIMD>)RGY_SIMD::NONE;
+        g_cpuinfo.avx2 = ((std::underlying_type_t<RGY_SIMD>)simd & (std::underlying_type_t<RGY_SIMD>)RGY_SIMD::AVX2) != (std::underlying_type_t<RGY_SIMD>)RGY_SIMD::NONE;
         g_cpuinfo.initialized = true;
     }
 }
@@ -779,7 +769,7 @@ __global__ void kl_max_v(uchar4* dst, uchar4* src, int width, int height, int pi
     int y = threadIdx.y + blockIdx.y * blockDim.y;
 
     if (x < width && y < height) {
-        uchar4 sum = { 0 };
+        uchar4 sum = make_uchar4(0, 0, 0, 0);
         for (int i = -RADIUS; i <= RADIUS; ++i) {
             sum = max(sum, src[x + (y + i) * pitch]);
         }
@@ -792,7 +782,7 @@ void cpu_max_v(uchar4* dst, uchar4* src, int width, int height, int pitch)
 {
     for (int y = 0; y < height; ++y) {
         for (int x = 0; x < width; ++x) {
-            uchar4 sum = { 0 };
+            uchar4 sum = make_uchar4(0, 0, 0, 0);
             for (int i = -RADIUS; i <= RADIUS; ++i) {
                 sum = max(sum, src[x + (y + i) * pitch]);
             }
@@ -989,32 +979,59 @@ class QPForDeblock : public KFMFilterBase
             qpTable0, qpTableNonB0, bmask0, qpTable1, qpTableNonB1, bmask1,
             qpStride, qpScaleType, 1 - logUVx, 1 - logUVy, env);
 
+#if AVISYNTH_MODE == AVISYNTH_NEO
         dst.SetProperty("DEBLOCK_QP_FLAG",
             (int)(bmask0 ? QP_TABLE_USING_DC : qpTable0 ? QP_TABLE_ONLY : QP_TABLE_CONSTANT));
-
+#endif
         return dst.frame;
     }
 
     // QPテーブルのフレーム指定
     PVideoFrame QPEntry(PVideoFrame& qp0, PVideoFrame& qp1, PNeoEnv env)
     {
+#if AVISYNTH_MODE == AVISYNTH_NEO
         if (qp0->GetProperty("QP_Table_Non_B") == nullptr) {
             // QPテーブルがない
             Frame dst = env->NewVideoFrame(vi);
             dst.SetProperty("DEBLOCK_QP_FLAG", QP_TABLE_NONE);
             return dst.frame;
         }
-
         auto OptGetFrame = [](const AVSMapValue* value) {
             return value ? value->GetFrame() : nullptr;
             };
+#elif AVISYNTH_MODE == AVISYNTH_PLUS
+        int error;
+        auto avsmap = env->getFramePropsRO(qp0);
+        env->propGetInt(avsmap, "QP_Table_Non_B", 0, &error); // check existance only
+        if (error) {
+            // QPテーブルがない
+            Frame dst = env->NewVideoFrame(vi);
+            env->propSetInt(env->getFramePropsRW(dst.frame), "DEBLOCK_QP_FLAG", QP_TABLE_NONE, 0);
+            return dst.frame;
+        }
+        auto OptGetFrame = [](PVideoFrame value) {
+          return value ? value : nullptr;
+        };
+#else
+        static_assert(false, "Invalid AVISYNTH_MODE");
+#endif
 
+
+#if AVISYNTH_MODE == AVISYNTH_NEO
         Frame qpTable0 = qp0->GetProperty("QP_Table")->GetFrame();
         Frame qpTableNonB0 = qp0->GetProperty("QP_Table_Non_B")->GetFrame();
         int qpStride = (int)qp0->GetProperty("QP_Stride")->GetInt();
         int qpScaleType = (int)qp0->GetProperty("QP_ScaleType")->GetInt();
         const AVSMapValue* dc0 = b_adap ? qp0->GetProperty("DC_Table") : nullptr;
-
+#elif AVISYNTH_MODE == AVISYNTH_PLUS
+        Frame qpTable0 = env->propGetFrame(avsmap, "QP_Table", 0, &error);
+        Frame qpTableNonB0 = env->propGetFrame(avsmap, "QP_Table_Non_B", 0, &error);
+        int qpStride = (int)env->propGetInt(avsmap, "QP_Stride", 0, &error);
+        int qpScaleType = (int)env->propGetInt(avsmap, "QP_ScaleType", 0, &error);
+        const PVideoFrame dc0 = b_adap ? env->propGetFrame(avsmap, "DC_Table", 0, &error) : nullptr;
+#else
+        static_assert(false, "Invalid AVISYNTH_MODE");
+#endif
         if (!qp1) {
             return QPEntry(
                 qpTable0.GetReadPtr<uint8_t>(), qpTableNonB0.GetReadPtr<uint8_t>(), OptGetFrame(dc0),
@@ -1022,10 +1039,18 @@ class QPForDeblock : public KFMFilterBase
                 qpStride, qpScaleType, env);
         }
 
+#if AVISYNTH_MODE == AVISYNTH_NEO
         Frame qpTable1 = qp1->GetProperty("QP_Table")->GetFrame();
         Frame qpTableNonB1 = qp1->GetProperty("QP_Table_Non_B")->GetFrame();
         const AVSMapValue* dc1 = b_adap ? qp1->GetProperty("DC_Table") : nullptr;
-
+#elif AVISYNTH_MODE == AVISYNTH_PLUS
+        auto avsmap1 = env->getFramePropsRO(qp1);
+        Frame qpTable1 = env->propGetFrame(avsmap1, "QP_Table", 0, &error);
+        Frame qpTableNonB1 = env->propGetFrame(avsmap1, "QP_Table_Non_B", 0, &error);
+        const PVideoFrame dc1 = b_adap ? env->propGetFrame(avsmap1, "DC_Table", 0, &error) : nullptr;
+#else
+        static_assert(false, "Invalid AVISYNTH_MODE");
+#endif
         return QPEntry(
             qpTable0.GetReadPtr<uint8_t>(), qpTableNonB0.GetReadPtr<uint8_t>(), OptGetFrame(dc0),
             qpTable1.GetReadPtr<uint8_t>(), qpTableNonB1.GetReadPtr<uint8_t>(), OptGetFrame(dc1),
@@ -1081,10 +1106,22 @@ public:
             return QPEntry(nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, 0, 0, env);
         }
 
+#if AVISYNTH_MODE == AVISYNTH_NEO
         if (src.GetProperty("KFM_SourceStart")) {
             // フレーム指定あり
             int start = (int)src.GetProperty("KFM_SourceStart")->GetInt();
             int num = (int)src.GetProperty("KFM_NumSourceFrames")->GetInt();
+#elif AVISYNTH_MODE == AVISYNTH_PLUS
+        int error;
+        auto avsmap = env->getFramePropsRO(src.frame);
+        env->propGetInt(avsmap, "KFM_SourceStart", 0, &error); // check existance only
+        if (!error) {
+            // フレーム指定あり
+            int start = (int)env->propGetInt(avsmap, "KFM_SourceStart", 0, &error);
+            int num = (int)env->propGetInt(avsmap, "KFM_NumSourceFrames", 0, &error);
+#else
+        static_assert(false, "Invalid AVISYNTH_MODE");
+#endif
 
             // 想定されるフレームと離れすぎてたらバグの可能性が高いので検出
             int qp_n = (int)(frameRateConv * n + 0.3f);
@@ -1094,9 +1131,13 @@ public:
 
             PVideoFrame dst;
             if (num <= 1) {
-                dst = QPEntry(GetQPFrame(start, env), PVideoFrame(), env);
+                PVideoFrame qp0 = GetQPFrame(start, env);
+                PVideoFrame qp1 = PVideoFrame();
+                dst = QPEntry(qp0, qp1, env);
             } else {
-                dst = QPEntry(GetQPFrame(start, env), GetQPFrame(start + 1, env), env);
+                PVideoFrame qp0 = GetQPFrame(start, env);
+                PVideoFrame qp1 = GetQPFrame(start + 1, env);
+                dst = QPEntry(qp0, qp1, env);
             }
             return dst;
         }
@@ -1104,11 +1145,14 @@ public:
         if (qpclip) {
             // QPクリップ指定あり
             int qp_n = (int)(frameRateConv * n + 0.3f);
-            return QPEntry(GetQPFrame(qp_n, env), PVideoFrame(), env);
+            PVideoFrame qp0 = GetQPFrame(qp_n, env);
+            PVideoFrame qp1 = PVideoFrame();
+            return QPEntry(qp0, qp1, env);
         }
 
         // ソースフレームからQP取得
-        return QPEntry(src.frame, PVideoFrame(), env);
+        PVideoFrame qp1 = PVideoFrame();
+        return QPEntry(src.frame, qp1, env);
     }
 
     int __stdcall SetCacheHints(int cachehints, int frame_range) {
@@ -1304,8 +1348,8 @@ void cpu_show_sharpen_coeff(pixel_t* dst, int width, int height, int pitch,
 
 template <typename T> struct TextureFormat { static cudaChannelFormatDesc desc; };
 
-cudaChannelFormatDesc TextureFormat<uint8_t>::desc = { 8, 0, 0, 0, cudaChannelFormatKindUnsigned };
-cudaChannelFormatDesc TextureFormat<uint16_t>::desc = { 16, 0, 0, 0, cudaChannelFormatKindUnsigned };
+template<> cudaChannelFormatDesc TextureFormat<uint8_t>::desc = { 8, 0, 0, 0, cudaChannelFormatKindUnsigned };
+template<> cudaChannelFormatDesc TextureFormat<uint16_t>::desc = { 16, 0, 0, 0, cudaChannelFormatKindUnsigned };
 
 template <typename pixel_t>
 cudaResourceDesc makeResourceDesc(
@@ -1651,14 +1695,22 @@ class KDeblock : public KFMFilterBase
             }
             };
         char buf[100];
-        sprintf_s(buf, "KDeblock: %s", getMessage(flag));
+        sprintf(buf, "KDeblock: %s", getMessage(flag));
         DrawText<pixel_t>(dst.frame, vi.BitsPerComponent(), 0, 0, buf, env);
     }
 
     template <typename pixel_t>
     PVideoFrame DeblockEntry(Frame& src, Frame& qp, PNeoEnv env)
     {
+#if AVISYNTH_MODE == AVISYNTH_NEO
         int qpflag = (int)qp.GetProperty("DEBLOCK_QP_FLAG")->GetInt();
+#elif AVISYNTH_MODE == AVISYNTH_PLUS
+        int error;
+        int qpflag = (int)env->propGetInt(env->getFramePropsRO(qp.frame), "DEBLOCK_QP_FLAG", 0, &error);
+        if (error) qpflag = (int)(-1);
+#else
+        static_assert(false, "Invalid AVISYNTH_MODE");
+#endif
 
         if (qpflag == QP_TABLE_NONE) {
             // QPテーブルがない
@@ -1851,24 +1903,55 @@ public:
         Frame dst = env->NewVideoFrame(vi);
 
         if (dc) {
+#if AVISYNTH_MODE == AVISYNTH_NEO
             const AVSMapValue* prop = src.GetProperty("DC_Table");
             if (prop == nullptr) {
+#elif AVISYNTH_MODE == AVISYNTH_PLUS
+            int error;
+            PVideoFrame propFrame = env->propGetFrame(env->getFramePropsRO(src.frame), "DC_Table", 0, &error);
+            if (error || propFrame == nullptr) {
+#else
+            static_assert(false, "Invalid AVISYNTH_MODE");
+#endif
                 cpu_fill<uint8_t, 0>(dst.GetWritePtr<uint8_t>(), vi.width, vi.height, dst.GetPitch<uint8_t>());
                 DrawText<uint8_t>(dst.frame, 8, 0, 0, "No DC table ...", env);
             } else {
+#if AVISYNTH_MODE == AVISYNTH_NEO
                 Frame dcTable = prop->GetFrame();
+#elif AVISYNTH_MODE == AVISYNTH_PLUS
+                Frame dcTable = propFrame;
+#else
+                static_assert(false, "Invalid AVISYNTH_MODE");
+#endif
                 Copy<uint8_t>(dst.GetWritePtr<uint8_t>(), dst.GetPitch<uint8_t>(),
                     dcTable.GetReadPtr<uint8_t>(), dcTable.GetPitch<uint8_t>(), vi.width, vi.height, env);
             }
         } else {
+#if AVISYNTH_MODE == AVISYNTH_NEO
             const AVSMapValue* prop = src.GetProperty(nonB ? "QP_Table_Non_B" : "QP_Table");
             if (prop == nullptr) {
+#elif AVISYNTH_MODE == AVISYNTH_PLUS
+            int error;
+            auto avsmap = env->getFramePropsRO(src.frame);
+            PVideoFrame propFrame = env->propGetFrame(avsmap, nonB ? "QP_Table_Non_B" : "QP_Table", 0, &error);
+            if (error || propFrame == nullptr) {
+#else
+            static_assert(false, "Invalid AVISYNTH_MODE");
+#endif
                 cpu_fill<uint8_t, 0>(dst.GetWritePtr<uint8_t>(), vi.width, vi.height, dst.GetPitch<uint8_t>());
                 DrawText<uint8_t>(dst.frame, 8, 0, 0, "No QP table ...", env);
             } else {
+#if AVISYNTH_MODE == AVISYNTH_NEO
                 Frame qpTable = prop->GetFrame();
                 int qpStride = (int)src.GetProperty("QP_Stride")->GetInt();
                 int qpScaleType = (int)src.GetProperty("QP_ScaleType")->GetInt();
+#elif AVISYNTH_MODE == AVISYNTH_PLUS
+                Frame qpTable = propFrame;
+                int qpStride = (int)env->propGetInt(avsmap, "QP_Stride", 0, &error);
+                int qpScaleType = (int)env->propGetInt(avsmap, "QP_ScaleType", 0, &error);
+#else
+                static_assert(false, "Invalid AVISYNTH_MODE");
+#endif
                 if (IS_CUDA) {
                     cudaStream_t stream = static_cast<cudaStream_t>(env->GetDeviceStream());
                     dim3 threads(32, 8);
@@ -1923,10 +2006,20 @@ static AVSValue __cdecl FrameType(AVSValue args, void* user_data, IScriptEnviron
     int n = cn.AsInt();
     n = min(max(n, 0), vi.num_frames - 1);
 
+#if AVISYNTH_MODE == AVISYNTH_NEO
     auto entry = child->GetFrame(n, env)->GetProperty("FrameType");
     if (entry) {
         return (int)entry->GetInt();
     }
+#elif AVISYNTH_MODE == AVISYNTH_PLUS
+    int error;
+    auto entry = env->propGetInt(env->getFramePropsRO(child->GetFrame(n, env)), "FrameType", 0, &error);
+    if (!error) {
+        return (int)entry;
+    }
+#else
+    static_assert(false, "Invalid AVISYNTH_MODE");
+#endif
     return 0;
 }
 

@@ -47,6 +47,35 @@
 #include <smmintrin.h>
 #include <algorithm>
 
+
+RGY_TARGET("sse4.1")
+static RGY_FORCEINLINE __m128i af_mm_packus_epi32_sse41(__m128i a, __m128i b) {
+	return _mm_packus_epi32(a, b);
+}
+
+RGY_TARGET("sse4.1")
+static RGY_FORCEINLINE __m128i af_mm_min_epu16_sse41(__m128i a, __m128i b) {
+	return _mm_min_epu16(a, b);
+}
+
+template<bool useSSE41>
+static RGY_FORCEINLINE __m128i af_mm_packus_epi32(__m128i a, __m128i b) {
+	if constexpr(useSSE41) {
+		return af_mm_packus_epi32_sse41(a, b);
+	} else {
+		return _MM_PACKUS_EPI32(a, b);
+	}
+}
+
+template<bool useSSE41>
+static RGY_FORCEINLINE __m128i af_mm_min_epu16(__m128i a, __m128i b) {
+	if constexpr(useSSE41) {
+		return af_mm_min_epu16_sse41(a, b);
+	} else {
+		return _MM_MIN_EPU16(a, b);
+	}
+}
+
 /***************************************
 ********* Templated SSE Loader ********
 ***************************************/
@@ -54,33 +83,35 @@
 typedef __m128i (SSELoader)(const __m128i*);
 typedef __m128 (SSELoader_ps)(const float*);
 
-__forceinline __m128i simd_load_aligned(const __m128i* adr)
+RGY_FORCEINLINE __m128i simd_load_aligned(const __m128i* adr)
 {
 	return _mm_load_si128(adr);
 }
 
-__forceinline __m128i simd_load_unaligned(const __m128i* adr)
+RGY_FORCEINLINE __m128i simd_load_unaligned(const __m128i* adr)
 {
 	return _mm_loadu_si128(adr);
 }
 
-__forceinline __m128i simd_load_unaligned_sse3(const __m128i* adr)
+RGY_TARGET("sse3")
+RGY_FORCEINLINE __m128i simd_load_unaligned_sse3(const __m128i* adr)
 {
 	return _mm_lddqu_si128(adr);
 }
 
-__forceinline __m128i simd_load_streaming(const __m128i* adr)
+RGY_TARGET("sse4.1")
+RGY_FORCEINLINE __m128i simd_load_streaming(const __m128i* adr)
 {
 	return _mm_stream_load_si128(const_cast<__m128i*>(adr));
 }
 
 // float loaders
-__forceinline __m128 simd_loadps_aligned(const float * adr)
+RGY_FORCEINLINE __m128 simd_loadps_aligned(const float * adr)
 {
 	return _mm_load_ps(adr);
 }
 
-__forceinline __m128 simd_loadps_unaligned(const float* adr)
+RGY_FORCEINLINE __m128 simd_loadps_unaligned(const float* adr)
 {
 	return _mm_loadu_ps(adr);
 }
@@ -331,8 +362,8 @@ static void resize_v_c_planar(BYTE* dst, const BYTE* src, int dst_pitch, int src
 		const pixel_t* src_ptr = src0 + pitch_table[offset] / sizeof(pixel_t);
 
 		for (int x = 0; x < width; x++) {
-			// todo: check whether int result is enough for 16 bit samples (can an int overflow because of 16384 scale or really need __int64?)
-			typename std::conditional < sizeof(pixel_t) == 1, int, typename std::conditional < sizeof(pixel_t) == 2, __int64, float>::type >::type result;
+			// todo: check whether int result is enough for 16 bit samples (can an int overflow because of 16384 scale or really need int64_t?)
+			typename std::conditional < sizeof(pixel_t) == 1, int, typename std::conditional < sizeof(pixel_t) == 2, int64_t, float>::type >::type result;
 			result = 0;
 			for (int i = 0; i < filter_size; i++) {
 				result += (src_ptr + pitch_table[i] / sizeof(pixel_t))[x] * current_coeff[i];
@@ -610,6 +641,7 @@ static void resize_v_sse2_planar(BYTE* dst, const BYTE* src, int dst_pitch, int 
 
 
 template<SSELoader load>
+RGY_TARGET("ssse3")
 static void resize_v_ssse3_planar(BYTE* dst, const BYTE* src, int dst_pitch, int src_pitch, ResamplingProgram* program, int width, int target_height, int bits_per_pixel, const int* pitch_table, const void* storage)
 {
   AVS_UNUSED(bits_per_pixel);
@@ -680,7 +712,7 @@ static void resize_v_ssse3_planar(BYTE* dst, const BYTE* src, int dst_pitch, int
 	}
 }
 
-__forceinline static void resize_v_create_pitch_table(int* table, int pitch, int height) {
+RGY_FORCEINLINE static void resize_v_create_pitch_table(int* table, int pitch, int height) {
 	table[0] = 0;
 	for (int i = 1; i < height; i++) {
 		table[i] = table[i - 1] + pitch;
@@ -820,8 +852,8 @@ static void resize_h_c_planar(BYTE* dst, const BYTE* src, int dst_pitch, int src
 			current_coeff = (coeff_t *)program->pixel_coefficient_float;
 		for (int x = 0; x < width; x++) {
 			int begin = program->pixel_offset[x];
-			// todo: check whether int result is enough for 16 bit samples (can an int overflow because of 16384 scale or really need __int64?)
-			typename std::conditional < sizeof(pixel_t) == 1, int, typename std::conditional < sizeof(pixel_t) == 2, __int64, float>::type >::type result;
+			// todo: check whether int result is enough for 16 bit samples (can an int overflow because of 16384 scale or really need int64_t?)
+			typename std::conditional < sizeof(pixel_t) == 1, int, typename std::conditional < sizeof(pixel_t) == 2, int64_t, float>::type >::type result;
 			result = 0;
 			for (int i = 0; i < filter_size; i++) {
 				result += (src0 + y*src_pitch)[(begin + i)] * current_coeff[i];
@@ -907,7 +939,7 @@ std::unique_ptr<DeviceLocalData<float>> make_h_coeff_for_cuda(
 
 //-------- 128 bit float Horizontals
 
-__forceinline static void process_one_pixel_h_float(const float *src, int begin, int i, float *&current_coeff, __m128 &result) {
+RGY_FORCEINLINE static void process_one_pixel_h_float(const float *src, int begin, int i, float *&current_coeff, __m128 &result) {
 	// 2x4 pixels
 	__m128 data_l_single = _mm_loadu_ps(reinterpret_cast<const float*>(src + begin + i * 8));
 	__m128 data_h_single = _mm_loadu_ps(reinterpret_cast<const float*>(src + begin + i * 8 + 4));
@@ -921,7 +953,7 @@ __forceinline static void process_one_pixel_h_float(const float *src, int begin,
 }
 
 template<int filtersizemod8>
-__forceinline static void process_one_pixel_h_float_mask(const float *src, int begin, int i, float *&current_coeff, __m128 &result, __m128 &mask) {
+RGY_FORCEINLINE static void process_one_pixel_h_float_mask(const float *src, int begin, int i, float *&current_coeff, __m128 &result, __m128 &mask) {
 	__m128 data_l_single;
 	__m128 data_h_single;
 	// 2x4 pixels
@@ -950,6 +982,7 @@ __forceinline static void process_one_pixel_h_float_mask(const float *src, int b
 
 // filtersizealigned8: special: 1, 2. Generic: -1
 template<int filtersizealigned8, int filtersizemod8>
+RGY_TARGET("ssse3")
 static void resizer_h_ssse3_generic_float(BYTE* dst8, const BYTE* src8, int dst_pitch, int src_pitch, ResamplingProgram* program, int width, int height, int bits_per_pixel) {
   AVS_UNUSED(bits_per_pixel);
 	const int filter_size_numOfBlk8 = (filtersizealigned8 >= 1) ? filtersizealigned8 : (AlignNumber(program->filter_size, 8) / 8);
@@ -1127,7 +1160,7 @@ static void resizer_h_ssse3_generic_float(BYTE* dst8, const BYTE* src8, int dst_
 //-------- 128 bit uint16_t Horizontals
 
 template<bool lessthan16bit>
-__forceinline static void process_one_pixel_h_uint16_t(const uint16_t *src, int begin, int i, short *&current_coeff, __m128i &result, const __m128i &shifttosigned) {
+RGY_FORCEINLINE static void process_one_pixel_h_uint16_t(const uint16_t *src, int begin, int i, short *&current_coeff, __m128i &result, const __m128i &shifttosigned) {
 	__m128i data_single = _mm_loadu_si128(reinterpret_cast<const __m128i*>(src + begin + i * 8)); // 8 pixels
 	if (!lessthan16bit)
 		data_single = _mm_add_epi16(data_single, shifttosigned); // unsigned -> signed
@@ -1140,6 +1173,7 @@ __forceinline static void process_one_pixel_h_uint16_t(const uint16_t *src, int 
 // filter_size <= 16 -> filter_size_align8 == 2 -> loop 0..1 hope it'll be optimized
 // filter_size > 16 -> use parameter AlignNumber(program->filter_size_numOfFullBlk8, 8) / 8;
 template<bool lessthan16bit, int filtersizealigned8, bool hasSSE41>
+RGY_TARGET("ssse3")
 static void internal_resizer_h_sse34_generic_uint16_t(BYTE* dst8, const BYTE* src8, int dst_pitch, int src_pitch, ResamplingProgram* program, int width, int height, int bits_per_pixel) {
 	// 1 and 2: special case for compiler optimization
 	const int filter_size_numOfBlk8 = (filtersizealigned8 >= 1) ? filtersizealigned8 : (AlignNumber(program->filter_size, 8) / 8);
@@ -1196,10 +1230,10 @@ static void internal_resizer_h_sse34_generic_uint16_t(BYTE* dst8, const BYTE* sr
 				result = _mm_add_epi32(result, shiftfromsigned);
 			result = _mm_srai_epi32(result, FPScale16bits); // shift back integer arithmetic 13 bits precision
 
-			__m128i result_4x_uint16 = hasSSE41 ? _mm_packus_epi32(result, zero) : _MM_PACKUS_EPI32(result, zero); // 4*32+zeros = lower 4*16 OK
+			__m128i result_4x_uint16 = af_mm_packus_epi32<hasSSE41>(result, zero); // 4*32+zeros = lower 4*16 OK
 																																																						 // extra clamp for 10-14 bit
 			if (lessthan16bit)
-				result_4x_uint16 = hasSSE41 ? _mm_min_epu16(result_4x_uint16, clamp_limit) : _MM_MIN_EPU16(result_4x_uint16, clamp_limit);
+				result_4x_uint16 = af_mm_min_epu16<hasSSE41>(result_4x_uint16, clamp_limit);
 			_mm_storel_epi64(reinterpret_cast<__m128i *>(dst + x), result_4x_uint16);
 
 		}
@@ -1210,23 +1244,49 @@ static void internal_resizer_h_sse34_generic_uint16_t(BYTE* dst8, const BYTE* sr
 }
 
 //-------- 128 bit uint16_t Horizontal Dispatcher
+template<bool lessthan16bit>
+RGY_TARGET("ssse3")
+static void resizer_h_ssse3_generic_uint16_t(BYTE* dst8, const BYTE* src8, int dst_pitch, int src_pitch, ResamplingProgram* program, int width, int height, int bits_per_pixel) {
+	const int filter_size_numOfBlk8 = AlignNumber(program->filter_size, 8) / 8;
+
+	if (filter_size_numOfBlk8 == 1)
+		internal_resizer_h_sse34_generic_uint16_t<lessthan16bit, 1, false>(dst8, src8, dst_pitch, src_pitch, program, width, height, bits_per_pixel);
+	else if (filter_size_numOfBlk8 == 2)
+		internal_resizer_h_sse34_generic_uint16_t<lessthan16bit, 2, false>(dst8, src8, dst_pitch, src_pitch, program, width, height, bits_per_pixel);
+	else // -1: basic method, use program->filter_size
+		internal_resizer_h_sse34_generic_uint16_t<lessthan16bit, -1, false>(dst8, src8, dst_pitch, src_pitch, program, width, height, bits_per_pixel);
+}
+
+template<bool lessthan16bit>
+RGY_TARGET("sse4.1")
+static void resizer_h_sse4_generic_uint16_t(BYTE* dst8, const BYTE* src8, int dst_pitch, int src_pitch, ResamplingProgram* program, int width, int height, int bits_per_pixel) {
+	const int filter_size_numOfBlk8 = AlignNumber(program->filter_size, 8) / 8;
+
+	if (filter_size_numOfBlk8 == 1)
+		internal_resizer_h_sse34_generic_uint16_t<lessthan16bit, 1, true>(dst8, src8, dst_pitch, src_pitch, program, width, height, bits_per_pixel);
+	else if (filter_size_numOfBlk8 == 2)
+		internal_resizer_h_sse34_generic_uint16_t<lessthan16bit, 2, true>(dst8, src8, dst_pitch, src_pitch, program, width, height, bits_per_pixel);
+	else // -1: basic method, use program->filter_size
+		internal_resizer_h_sse34_generic_uint16_t<lessthan16bit, -1, true>(dst8, src8, dst_pitch, src_pitch, program, width, height, bits_per_pixel);
+}
 
 template<bool lessthan16bit, bool hasSSE41>
 static void resizer_h_sse34_generic_uint16_t(BYTE* dst8, const BYTE* src8, int dst_pitch, int src_pitch, ResamplingProgram* program, int width, int height, int bits_per_pixel) {
 	const int filter_size_numOfBlk8 = AlignNumber(program->filter_size, 8) / 8;
-
-	if (filter_size_numOfBlk8 == 1)
-		internal_resizer_h_sse34_generic_uint16_t<lessthan16bit, 1, hasSSE41>(dst8, src8, dst_pitch, src_pitch, program, width, height, bits_per_pixel);
-	else if (filter_size_numOfBlk8 == 2)
-		internal_resizer_h_sse34_generic_uint16_t<lessthan16bit, 2, hasSSE41>(dst8, src8, dst_pitch, src_pitch, program, width, height, bits_per_pixel);
-	else // -1: basic method, use program->filter_size
-		internal_resizer_h_sse34_generic_uint16_t<lessthan16bit, -1, hasSSE41>(dst8, src8, dst_pitch, src_pitch, program, width, height, bits_per_pixel);
+	
+	if (hasSSE41) {
+		resizer_h_sse4_generic_uint16_t<lessthan16bit>(dst8, src8, dst_pitch, src_pitch, program, width, height, bits_per_pixel);
+	} else {
+		resizer_h_ssse3_generic_uint16_t<lessthan16bit>(dst8, src8, dst_pitch, src_pitch, program, width, height, bits_per_pixel);
+	}
 }
+
+
 
 //-------- 128 bit uint16_t Verticals
 
 template<bool lessthan16bit, int index>
-__forceinline static void process_chunk_v_uint16_t(const uint16_t *src2_ptr, int src_pitch, __m128i &coeff01234567, __m128i &result_single_lo, __m128i &result_single_hi, const __m128i &shifttosigned) {
+RGY_FORCEINLINE static void process_chunk_v_uint16_t(const uint16_t *src2_ptr, int src_pitch, __m128i &coeff01234567, __m128i &result_single_lo, __m128i &result_single_hi, const __m128i &shifttosigned) {
 	// offset table generating is what preventing us from overaddressing
 	// 0-1
 	__m128i src_even = _mm_load_si128(reinterpret_cast<const __m128i*>(src2_ptr + index * src_pitch)); // 4x 16bit pixels
@@ -1328,9 +1388,9 @@ void internal_resize_v_sse_planar_uint16_t(BYTE* dst0, const BYTE* src0, int dst
 			result_lo = _mm_srai_epi32(result_lo, FPScale16bits); // shift back integer arithmetic 13 bits precision
 			result_hi = _mm_srai_epi32(result_hi, FPScale16bits);
 
-			__m128i result_8x_uint16 = hasSSE41 ? _mm_packus_epi32(result_lo, result_hi) : _MM_PACKUS_EPI32(result_lo, result_hi);
+			__m128i result_8x_uint16 = af_mm_packus_epi32<hasSSE41>(result_lo, result_hi);
 			if (lessthan16bit)
-				result_8x_uint16 = hasSSE41 ? _mm_min_epu16(result_8x_uint16, clamp_limit) : _MM_MIN_EPU16(result_8x_uint16, clamp_limit); // extra clamp for 10-14 bit
+				result_8x_uint16 = af_mm_min_epu16<hasSSE41>(result_8x_uint16, clamp_limit); // extra clamp for 10-14 bit
 			_mm_store_si128(reinterpret_cast<__m128i *>(dst + x), result_8x_uint16);
 		}
 
@@ -1578,6 +1638,7 @@ void resize_v_sse2_planar_float(BYTE* dst0, const BYTE* src0, int dst_pitch, int
 
 //-------- uint8_t Horizontal (8bit)
 
+RGY_TARGET("ssse3")
 static void resizer_h_ssse3_generic(BYTE* dst, const BYTE* src, int dst_pitch, int src_pitch, ResamplingProgram* program, int width, int height, int bits_per_pixel) {
   AVS_UNUSED(bits_per_pixel);
 
@@ -1658,6 +1719,7 @@ static void resizer_h_ssse3_generic(BYTE* dst, const BYTE* src, int dst_pitch, i
 	}
 }
 
+RGY_TARGET("ssse3")
 static void resizer_h_ssse3_8(BYTE* dst, const BYTE* src, int dst_pitch, int src_pitch, ResamplingProgram* program, int width, int height, int bits_per_pixel) {
   AVS_UNUSED(bits_per_pixel);
 

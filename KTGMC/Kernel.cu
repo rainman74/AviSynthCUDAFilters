@@ -1,11 +1,11 @@
-#define _CRT_SECURE_NO_WARNINGS
+ï»¿#define _CRT_SECURE_NO_WARNINGS
 #include "avisynth.h"
 
-#define NOMINMAX
-#include <windows.h>
+#include "rgy_osdep.h"
 
 #include <algorithm>
 #include <memory>
+#include <string>
 
 #include <cuda_runtime_api.h>
 #include <cuda_device_runtime_api.h>
@@ -21,8 +21,8 @@
 
 #define LOG_PRINT 0
 
-// ‚±‚Ìƒtƒ@ƒCƒ‹‚ÉŠÖ‚µ‚Ä‚ÍA•À—ñ‚ÅÀs‚Å‚«‚ékernel”‚ª­‚È‚¢‚Ì‚ÅA‚ ‚Ü‚è‚‘¬‰»‚µ‚È‚¢
-// ‚Ü‚½’x‚­‚È‚é‚Ì‚ÅAstream‚É‚æ‚é•À—ñ‚Í–³Œø‰»‚·‚é
+// ã“ã®ãƒ•ã‚¡ã‚¤ãƒ«ã«é–¢ã—ã¦ã¯ã€ä¸¦åˆ—ã§å®Ÿè¡Œã§ãã‚‹kernelæ•°ãŒå°‘ãªã„ã®ã§ã€ã‚ã¾ã‚Šé«˜é€ŸåŒ–ã—ãªã„
+// ã¾ãŸé…ããªã‚‹ã®ã§ã€streamã«ã‚ˆã‚‹ä¸¦åˆ—ã¯ç„¡åŠ¹åŒ–ã™ã‚‹
 #define ENABLE_MULTI_STREAM 0
 
 class CUDAFilterBase : public GenericVideoFilter {
@@ -314,7 +314,7 @@ __global__ void kl_resample_h(
 
   int start_pos = tx + src_base;
   if (blockIdx.x == 0 || blockIdx.x == gridDim.x - 1) {
-    // x—¼’[‚Ìê‡‚ÍğŒ‚¢‚ë‚¢‚ë
+    // xä¸¡ç«¯ã®å ´åˆã¯æ¡ä»¶ã„ã‚ã„ã‚
     if (y < height) {
       if (start_pos + RESAMPLE_H_W * 0 < width) {
         if (start_pos >= 0) {
@@ -330,7 +330,7 @@ __global__ void kl_resample_h(
       if (start_pos + RESAMPLE_H_W * 3 < width) {
         ssrc[ty][tx + RESAMPLE_H_W * 3] = src[start_pos + RESAMPLE_H_W * 3 + y * src_pitch];
       }
-      // ÅŒã‚Ì”¼’[•”•ª
+      // æœ€å¾Œã®åŠç«¯éƒ¨åˆ†
       if (tx < filter_size + 1 && start_pos + RESAMPLE_H_W * 4 < width) {
         ssrc[ty][tx + RESAMPLE_H_W * 4] = src[start_pos + RESAMPLE_H_W * 4 + y * src_pitch];
       }
@@ -341,13 +341,13 @@ __global__ void kl_resample_h(
     }
   }
   else {
-    // x—¼’[‚Å‚Í‚È‚¢‚Ì‚ÅğŒ‚È‚µ
+    // xä¸¡ç«¯ã§ã¯ãªã„ã®ã§æ¡ä»¶ãªã—
     if (y < height) {
       ssrc[ty][tx + RESAMPLE_H_W * 0] = src[start_pos + RESAMPLE_H_W * 0 + y * src_pitch];
       ssrc[ty][tx + RESAMPLE_H_W * 1] = src[start_pos + RESAMPLE_H_W * 1 + y * src_pitch];
       ssrc[ty][tx + RESAMPLE_H_W * 2] = src[start_pos + RESAMPLE_H_W * 2 + y * src_pitch];
       ssrc[ty][tx + RESAMPLE_H_W * 3] = src[start_pos + RESAMPLE_H_W * 3 + y * src_pitch];
-      // ÅŒã‚Ì”¼’[•”•ª
+      // æœ€å¾Œã®åŠç«¯éƒ¨åˆ†
       if (tx < filter_size + 1 && start_pos + RESAMPLE_H_W * 4 < width) {
         ssrc[ty][tx + RESAMPLE_H_W * 4] = src[start_pos + RESAMPLE_H_W * 4 + y * src_pitch];
       }
@@ -406,7 +406,7 @@ class KTGMC_Bob : public CUDAFilterBase {
   int logUVx;
   int logUVy;
 
-  // 1ƒtƒŒ[ƒ€•ªƒLƒƒƒbƒVƒ…‚µ‚Ä‚¨‚­
+  // 1ãƒ•ãƒ¬ãƒ¼ãƒ åˆ†ã‚­ãƒ£ãƒƒã‚·ãƒ¥ã—ã¦ãŠã
   std::mutex mtx_;
   int cacheN;
   PVideoFrame cache[2];
@@ -483,7 +483,7 @@ public:
   {
     PNeoEnv env = env_;
 
-    // ƒtƒŒ[ƒ€”AFPS‚ğ2”{
+    // ãƒ•ãƒ¬ãƒ¼ãƒ æ•°ã€FPSã‚’2å€
     vi.num_frames *= 2;
     vi.MulDivFPS(2, 1);
 
@@ -503,7 +503,7 @@ public:
     PNeoEnv env = env_;
 
     if (!IS_CUDA) {
-      env->ThrowError("[KTGMC_Bob] CUDAƒtƒŒ[ƒ€‚ğ“ü—Í‚µ‚Ä‚­‚¾‚³‚¢");
+      env->ThrowError("[KTGMC_Bob] CUDAãƒ•ãƒ¬ãƒ¼ãƒ ã‚’å…¥åŠ›ã—ã¦ãã ã•ã„");
     }
 #if LOG_PRINT
     if (IS_CUDA) {
@@ -816,7 +816,7 @@ public:
     PNeoEnv env = env_;
 
     if (radius != 1 && radius != 2) {
-      env->ThrowError("[KBinomialTemporalSoften] radius‚Í1‚©2‚Å‚·");
+      env->ThrowError("[KBinomialTemporalSoften] radiusã¯1ã‹2ã§ã™");
     }
   }
 
@@ -825,7 +825,7 @@ public:
     PNeoEnv env = env_;
 
     if (!IS_CUDA) {
-      env->ThrowError("[KBinomialTemporalSoften] CUDAƒtƒŒ[ƒ€‚ğ“ü—Í‚µ‚Ä‚­‚¾‚³‚¢");
+      env->ThrowError("[KBinomialTemporalSoften] CUDAãƒ•ãƒ¬ãƒ¼ãƒ ã‚’å…¥åŠ›ã—ã¦ãã ã•ã„");
     }
 
     int pixelSize = vi.ComponentSize();
@@ -947,7 +947,7 @@ __device__ void dev_sort_8elem(T& a0, T& a1, T& a2, T& a3, T& a4, T& a5, T& a6, 
   CompareAndSwap cas;
 
   // Batcher's odd-even mergesort
-  // 8—v‘f‚È‚ç19comparison‚È‚Ì‚ÅÅ¬‚Ìƒ\[ƒeƒBƒ“ƒOƒlƒbƒgƒ[ƒN‚É‚È‚é‚Á‚Û‚¢
+  // 8è¦ç´ ãªã‚‰19comparisonãªã®ã§æœ€å°ã®ã‚½ãƒ¼ãƒ†ã‚£ãƒ³ã‚°ãƒãƒƒãƒˆãƒ¯ãƒ¼ã‚¯ã«ãªã‚‹ã£ã½ã„
   cas(a0, a1);
   cas(a2, a3);
   cas(a4, a5);
@@ -1256,7 +1256,7 @@ public:
     PNeoEnv env = env_;
 
     if (!IS_CUDA) {
-      env->ThrowError("[KRemoveGrain] CUDAƒtƒŒ[ƒ€‚ğ“ü—Í‚µ‚Ä‚­‚¾‚³‚¢");
+      env->ThrowError("[KRemoveGrain] CUDAãƒ•ãƒ¬ãƒ¼ãƒ ã‚’å…¥åŠ›ã—ã¦ãã ã•ã„");
     }
 
     int pixelSize = vi.ComponentSize();
@@ -1348,25 +1348,25 @@ class KRepair : public CUDAFilterBase {
 
       switch (mode) {
       case 1:
-        // Clips the source pixel with the Nth minimum and maximum found on the 3~3-pixel square from the reference clip.
+        // Clips the source pixel with the Nth minimum and maximum found on the 3Ã—3-pixel square from the reference clip.
         kl_repair_clip<pixel_t, 1>
           << <blocks, threads, 0, planeStream >> > (pDst, pDst1, pSrc, pSrc1, pRef, pRef1, width, height, pitch);
         DEBUG_SYNC;
         break;
       case 2:
-        // Clips the source pixel with the Nth minimum and maximum found on the 3~3-pixel square from the reference clip.
+        // Clips the source pixel with the Nth minimum and maximum found on the 3Ã—3-pixel square from the reference clip.
         kl_repair_clip<pixel_t, 2>
           << <blocks, threads, 0, planeStream >> > (pDst, pDst1, pSrc, pSrc1, pRef, pRef1, width, height, pitch);
         DEBUG_SYNC;
         break;
       case 3:
-        // Clips the source pixel with the Nth minimum and maximum found on the 3~3-pixel square from the reference clip.
+        // Clips the source pixel with the Nth minimum and maximum found on the 3Ã—3-pixel square from the reference clip.
         kl_repair_clip<pixel_t, 3>
           << <blocks, threads, 0, planeStream >> > (pDst, pDst1, pSrc, pSrc1, pRef, pRef1, width, height, pitch);
         DEBUG_SYNC;
         break;
       case 4:
-        // Clips the source pixel with the Nth minimum and maximum found on the 3~3-pixel square from the reference clip.
+        // Clips the source pixel with the Nth minimum and maximum found on the 3Ã—3-pixel square from the reference clip.
         kl_repair_clip<pixel_t, 4>
           << <blocks, threads, 0, planeStream >> > (pDst, pDst1, pSrc, pSrc1, pRef, pRef1, width, height, pitch);
         DEBUG_SYNC;
@@ -1414,7 +1414,7 @@ public:
     PNeoEnv env = env_;
 
     if (!IS_CUDA) {
-      env->ThrowError("[KRepair] CUDAƒtƒŒ[ƒ€‚ğ“ü—Í‚µ‚Ä‚­‚¾‚³‚¢");
+      env->ThrowError("[KRepair] CUDAãƒ•ãƒ¬ãƒ¼ãƒ ã‚’å…¥åŠ›ã—ã¦ãã ã•ã„");
     }
 
     int pixelSize = vi.ComponentSize();
@@ -1579,7 +1579,7 @@ public:
     PNeoEnv env = env_;
 
     if (!IS_CUDA) {
-      env->ThrowError("[KVerticalCleaner] CUDAƒtƒŒ[ƒ€‚ğ“ü—Í‚µ‚Ä‚­‚¾‚³‚¢");
+      env->ThrowError("[KVerticalCleaner] CUDAãƒ•ãƒ¬ãƒ¼ãƒ ã‚’å…¥åŠ›ã—ã¦ãã ã•ã„");
     }
 
     int pixelSize = vi.ComponentSize();
@@ -1723,7 +1723,7 @@ public:
     int width = vi.width;
     int height = vi.height;
 
-    // QTGMC‚É‡‚í‚¹‚é
+    // QTGMCã«åˆã‚ã›ã‚‹
     double crop_width = width + 0.0001;
     double crop_height = height + 0.0001;
 
@@ -1741,7 +1741,7 @@ public:
     PNeoEnv env = env_;
 
     if (!IS_CUDA) {
-      env->ThrowError("[KGaussResize] CUDAƒtƒŒ[ƒ€‚ğ“ü—Í‚µ‚Ä‚­‚¾‚³‚¢");
+      env->ThrowError("[KGaussResize] CUDAãƒ•ãƒ¬ãƒ¼ãƒ ã‚’å…¥åŠ›ã—ã¦ãã ã•ã„");
     }
 
     int pixelSize = vi.ComponentSize();
@@ -1924,7 +1924,7 @@ public:
     PNeoEnv env = env_;
 
     if (!IS_CUDA) {
-      env->ThrowError("[KMasktoolFilterBase] CUDAƒtƒŒ[ƒ€‚ğ“ü—Í‚µ‚Ä‚­‚¾‚³‚¢");
+      env->ThrowError("[KMasktoolFilterBase] CUDAãƒ•ãƒ¬ãƒ¼ãƒ ã‚’å…¥åŠ›ã—ã¦ãã ã•ã„");
     }
 
     int pixelSize = vi.ComponentSize();
@@ -2037,7 +2037,7 @@ public:
 };
 
 
-// ã‰º2ƒ‰ƒCƒ“•ª‚Íœ‚¢‚Ä“n‚·
+// ä¸Šä¸‹2ãƒ©ã‚¤ãƒ³åˆ†ã¯é™¤ã„ã¦æ¸¡ã™
 template <typename vpixel_t, typename F>
 __global__ void kl_box5_v_and_border(
   vpixel_t* pDstA, vpixel_t* pDstB,
@@ -2613,7 +2613,7 @@ __global__ void kl_resharpen(
   }
 }
 
-// mt_lutxy("clamp_f x x y - sharpAdj * +")‚ğŒvZ
+// mt_lutxy("clamp_f x x y - sharpAdj * +")ã‚’è¨ˆç®—
 class KTGMC_Resharpen : public KMasktoolFilterBase
 {
   float sharpAdj;
@@ -3095,13 +3095,13 @@ __device__ float dev_tweak_search_clip(
   float repair, float bobbed, float blur, float scale, float invscale
 )
 {
-  // ƒŠƒeƒ‰ƒ‹‚ğƒXƒP[ƒ‹‚³‚¹‚é‚Ì‚Í–Ê“|‚È‚Ì‚Å’l‚Ì•û‚ğƒXƒP[ƒ‹‚³‚¹‚é
+  // ãƒªãƒ†ãƒ©ãƒ«ã‚’ã‚¹ã‚±ãƒ¼ãƒ«ã•ã›ã‚‹ã®ã¯é¢å€’ãªã®ã§å€¤ã®æ–¹ã‚’ã‚¹ã‚±ãƒ¼ãƒ«ã•ã›ã‚‹
   repair *= invscale;
   bobbed *= invscale;
   blur *= invscale;
 
   //float tweaked = ((repair + 3) < bobbed) ? (repair + 3) : ((repair - 3) > bobbed) ? (repair - 3) : bobbed;
-  // “™‰¿‚Èˆ—‚É‘‚«•Ï‚¦
+  // ç­‰ä¾¡ãªå‡¦ç†ã«æ›¸ãå¤‰ãˆ
   float tweaked = clamp(bobbed, repair - 3, repair + 3);
 
   float ret = ((blur + 7) < tweaked) ? (blur + 2) : ((blur - 7) > tweaked) ? (blur - 2) : (((blur * 51) + (tweaked * 49)) * (1.0f / 100.0f));
@@ -3228,7 +3228,7 @@ __global__ void kl_error_adjust(
   }
 }
 
-// mt_lutxy("clamp_f x " + string(errorAdjust1 + 1) + " * y " + string(errorAdjust1) + " * -")‚ğŒvZ
+// mt_lutxy("clamp_f x " + string(errorAdjust1 + 1) + " * y " + string(errorAdjust1) + " * -")ã‚’è¨ˆç®—
 class KTGMC_ErrorAdjust : public KMasktoolFilterBase
 {
   float errorAdj;
@@ -3362,7 +3362,7 @@ public:
     PNeoEnv env = env_;
 
     if (!IS_CUDA) {
-      env->ThrowError("[KDoubleWeave] CUDAƒtƒŒ[ƒ€‚ğ“ü—Í‚µ‚Ä‚­‚¾‚³‚¢");
+      env->ThrowError("[KDoubleWeave] CUDAãƒ•ãƒ¬ãƒ¼ãƒ ã‚’å…¥åŠ›ã—ã¦ãã ã•ã„");
     }
 #if LOG_PRINT
     if (IS_CUDA) {
@@ -3540,7 +3540,7 @@ void AddFuncKernel(IScriptEnvironment* env)
 
   env->AddFunction("KTGMC_BobShimmerFixesMerge", "cccc[y]i[u]i[v]i", KTGMC_BobShimmerFixesMerge::Create, 0);
   env->AddFunction("KTGMC_VResharpen", "c[y]i[u]i[v]i", KTGMC_VResharpen::Create, 0);
-  // mt_lutxy("clamp_f x x y - sharpAdj * +")‚ğŒvZ
+  // mt_lutxy("clamp_f x x y - sharpAdj * +")ã‚’è¨ˆç®—
   env->AddFunction("KTGMC_Resharpen", "cc[sharpAdj]f[y]i[u]i[v]i", KTGMC_Resharpen::Create, 0);
   env->AddFunction("KTGMC_LimitOverSharpen", "cccc[ovs]i[y]i[u]i[v]i", KTGMC_LimitOverSharpen::Create, 0);
   env->AddFunction("KTGMC_ToFullRange", "c[y]i[u]i[v]i", KTGMC_ToFullRange::Create, 0);

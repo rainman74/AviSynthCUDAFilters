@@ -1,6 +1,8 @@
 
 #include "CommonFunctions.h"
 #include "DeviceLocalData.h"
+#include <stdio.h>
+#include "KUtil.h"
 
 #include <cuda_runtime.h>
 

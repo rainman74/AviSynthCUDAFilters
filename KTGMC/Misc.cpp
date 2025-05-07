@@ -1,8 +1,6 @@
-#define _CRT_SECURE_NO_WARNINGS
+ï»¿#define _CRT_SECURE_NO_WARNINGS
 #include "avisynth.h"
-
-#define NOMINMAX
-#include <windows.h>
+#include "rgy_osdep.h"
 
 #include "CommonFunctions.h"
 #include "DeviceLocalData.h"
@@ -10,8 +8,9 @@
 #include "Misc.h"
 
 #include <string>
+#include <chrono>
 
-// common‚Ìcpp‚ðŽæ‚è“ü‚ê‚é
+// commonã®cppã‚’å–ã‚Šå…¥ã‚Œã‚‹
 #include "DebugWriter.cpp"
 #include "DeviceLocalData.cpp"
 
@@ -20,13 +19,15 @@ void AddFuncMV(IScriptEnvironment* env);
 
 static void init_console()
 {
+#if defined(_WIN32) || defined(_WIN64)
   AllocConsole();
   freopen("CONOUT$", "w", stdout);
   freopen("CONIN$", "r", stdin);
+#endif
 }
 
 void OnCudaError(cudaError_t err) {
-#if 1 // ƒfƒoƒbƒO—pi–{”Ô‚ÍŽæ‚èœ‚­j
+#if 1 // ãƒ‡ãƒãƒƒã‚°ç”¨ï¼ˆæœ¬ç•ªã¯å–ã‚Šé™¤ãï¼‰
   printf("[CUDA Error] %s (code: %d)\n", cudaGetErrorString(err), err);
 #endif
 }
@@ -50,16 +51,13 @@ public:
 
   PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env)
   {
-    LARGE_INTEGER liBefore, liAfter, liFreq;
-
-    QueryPerformanceCounter(&liBefore);
+    auto start = std::chrono::high_resolution_clock::now();
 
     PVideoFrame frame = child->GetFrame(n, env);
 
-    QueryPerformanceCounter(&liAfter);
-    QueryPerformanceFrequency(&liFreq);
-
-    double sec = (double)(liAfter.QuadPart - liBefore.QuadPart) / liFreq.QuadPart;
+    auto end = std::chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+    double sec = duration.count() / 1000000.0;
     printf("[%5d] N:%5d %s: %.1f ms\n", GetCurrentThreadId(), n, name.c_str(), sec * 1000);
 
     return frame;

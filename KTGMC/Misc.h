@@ -2,6 +2,8 @@
 
 #include "avisynth.h"
 #include <deque>
+#include <memory>
+#include <cuda_runtime_api.h>
 
 int GetDeviceTypes(const PClip& clip);
 

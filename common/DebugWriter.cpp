@@ -1,6 +1,4 @@
-
-#define NOMINMAX
-#include <Windows.h>
+#include "rgy_osdep.h"
 #include "DebugWriter.h"
 
 #include <stdio.h>
@@ -10,7 +8,7 @@
 bool FileExists(const char *fname)
 {
   FILE *file;
-  if (file = fopen(fname, "r")) {
+  if ((file = fopen(fname, "r")) != nullptr) {
     fclose(file);
     return true;
   }
@@ -31,8 +29,10 @@ static std::string GetUniqueFileName(const char* fmt)
 
 void DebugWrite8bitColorBitmap(const char* filenamefmt, const void* data, int width, int height)
 {
-  BITMAPFILEHEADER	bmpFileHeader = { 0 };
-  BITMAPINFOHEADER	bmpInfoHeader = { 0 };
+  BITMAPFILEHEADER	bmpFileHeader;
+  BITMAPINFOHEADER	bmpInfoHeader;
+  memset(&bmpFileHeader, 0, sizeof(BITMAPFILEHEADER));
+  memset(&bmpInfoHeader, 0, sizeof(BITMAPINFOHEADER));
 
   bmpFileHeader.bfType = 0x4d42;	/* "BM" */
   bmpFileHeader.bfOffBits = sizeof(BITMAPFILEHEADER) + sizeof(BITMAPINFOHEADER);
@@ -56,8 +56,10 @@ void DebugWrite8bitColorBitmap(const char* filenamefmt, const void* data, int wi
 
 void DebugWriteGrayBitmap(const char* filenamefmt, const void* data, int width, int height, int pixelSize)
 {
-  BITMAPFILEHEADER	bmpFileHeader = { 0 };
-  BITMAPINFOHEADER	bmpInfoHeader = { 0 };
+  BITMAPFILEHEADER	bmpFileHeader;
+  BITMAPINFOHEADER	bmpInfoHeader;
+  memset(&bmpFileHeader, 0, sizeof(BITMAPFILEHEADER));
+  memset(&bmpInfoHeader, 0, sizeof(BITMAPINFOHEADER));
 
   bmpFileHeader.bfType = 0x4d42;	/* "BM" */
   bmpFileHeader.bfOffBits = sizeof(BITMAPFILEHEADER) + sizeof(BITMAPINFOHEADER);
