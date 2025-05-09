@@ -2,8 +2,9 @@ project('AviSynthCUDAFilters', 'cpp', 'cuda',
   version : '1.0.0',
   default_options : [
     'cpp_std=c++17',
-    'warning_level=1',
-    'buildtype=release'
+    'warning_level=0',
+    'buildtype=release',
+    'libdir=lib/avisynth'  # インストール先を指定
   ]
 )
 
@@ -27,6 +28,7 @@ if host_machine.system() == 'linux'
     '-Wno-unused-type',
     '-Wno-unknown-pragmas',
     '-Wno-unused-but-set-variable',
+    '-Wno-reorder',
     '-Wno-sign-conversion'
   ]
   cuda_args += [ '-std=c++17',

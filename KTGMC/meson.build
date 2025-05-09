@@ -23,5 +23,5 @@ shared_module('KTGMC',
   link_args : link_args,
   name_prefix : '',
   install : true,
-  install_dir : get_option('libdir') / 'avisynth'
+  install_dir : get_option('libdir')
 ) 
