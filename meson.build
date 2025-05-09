@@ -18,6 +18,7 @@ cpp_args = [ '-DENABLE_CUDA=1' ]
 link_args = []
 if host_machine.system() == 'linux'
   cpp_args += [ '-std=c++17',
+    '-fno-operator-names',
     '-Wno-unused-variable',
     '-Wno-unused-function',
     '-Wno-unused-value',
@@ -61,6 +62,6 @@ subdir('common')
 subdir('KUtil')
 subdir('KFM')
 subdir('NNEDI3')
-#subdir('masktools')
+subdir('masktools')
 subdir('KTGMC')
 subdir('AvsCUDA')

@@ -1566,8 +1566,8 @@ TemporalSoften::TemporalSoften( PClip _child, unsigned radius, unsigned luma_thr
     scenechange (_scenechange),
     pixelsize(0),
     bits_per_pixel(0),
-    luma_threshold(min(luma_thresh,255u)),
-    chroma_threshold(min(chroma_thresh,255u)),
+    luma_threshold(std::min(luma_thresh,255u)),
+    chroma_threshold(std::min(chroma_thresh,255u)),
     kernel(2*min(radius,(unsigned int)MAX_RADIUS)+1) {
 
   child->SetCacheHints(CACHE_WINDOW,kernel);

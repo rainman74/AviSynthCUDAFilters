@@ -3933,7 +3933,7 @@ void Short2Bytes(pixel_t *pDst, int nDstPitch, tmp_t *pSrc, int nSrcPitch, int n
     for (int i = 0; i < nWidth; i++)
     {
       int a = (pSrc[i]) >> shift;
-      pDst[i] = min(max_pixel_value, a); // PF everyone can understand it
+      pDst[i] = std::min(max_pixel_value, a); // PF everyone can understand it
     }
     pDst += nDstPitch;
     pSrc += nSrcPitch;
@@ -3946,7 +3946,7 @@ void LimitChanges(pixel_t *pDst, int nDstPitch, const pixel_t *pSrc, int nSrcPit
   for (int h = 0; h < nHeight; h++)
   {
     for (int i = 0; i < nWidth; i++)
-      pDst[i] = (pixel_t)clamp((int)pDst[i], pSrc[i] - nLimit, pSrc[i] + nLimit);
+      pDst[i] = (pixel_t)clamp((int)pDst[i], (int)pSrc[i] - nLimit, (int)pSrc[i] + nLimit);
     pDst += nDstPitch;
     pSrc += nSrcPitch;
   }

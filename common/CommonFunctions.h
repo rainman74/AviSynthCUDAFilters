@@ -8,7 +8,8 @@
 #endif
 
 #ifdef ENABLE_CUDA
-#include <cuda_runtime_api.h>
+#include <cuda_runtime.h>
+#include <device_launch_parameters.h>
 #else
 #define __host__
 #define __device__
