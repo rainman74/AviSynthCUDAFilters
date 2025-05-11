@@ -1,50 +1,75 @@
-# AviSynthCUDAFilters - Linux ビルド手順
+# AviSynthCUDAFilters
 
 このプロジェクトはmesonビルドシステムを使用してLinux環境でビルドすることができます。
 
-## 必要条件
+## 注意
 
-- CUDA 11.0以上
-- AviSynth+
-- Meson
-- Ninja
-- g++ または clang++
-- pkg-config
+Windows版と比べ、以下の機能制限があります。
+
+- nnediのCPU版のアセンブラコードは動作しません。
+
+## 想定動作環境
+
+- Linux x64
+  - CUDAのインストール可能な環境であること
+  - インストールされたCUDAに対応するgccコンパイラがインストールされていること
+
+# Ubuntu 22.04/24.04 インストール方法
+
+[こちら](https://github.com/rigaya/AviSynthCUDAFilters/releases)から
+
+- CUDAを有効にしたAvisynthPlus
+- AvisynthCUDAFilters
+
+の2つをダウンロードしてインストールします。
+
+```bash
+sudo dpkg -i ./avisynth_xxx.deb
+sudo dpkg -i ./avisynthcudafilters_xxx.deb
+```
+
+
+# Linux ビルド手順
 
 ## 依存関係のインストール
 
 ### Ubuntu / Debian
 ```bash
 sudo apt update
-sudo apt install meson ninja-build build-essential pkg-config
+sudo apt install git cmake meson ninja-build build-essential pkg-config
 ```
-
-### AviSynth+のインストール
-AviSynth+はpkg-configを通して検出される必要があります。[AviSynth+のインストール手順](https://github.com/AviSynth/AviSynthPlus)を参照してください。
 
 ### CUDAのインストール
-NVIDIAの公式サイトから[CUDA Toolkit](https://developer.nvidia.com/cuda-downloads)をダウンロードしてインストールしてください。CUDA 11.0以上が必要です。
 
-## ビルド手順
+ご自身の環境に合わせ、[CUDA](https://developer.nvidia.com/cuda-downloads)をインストールします。
 
-```bash
-mkdir build && cd build && meson setup ..
-ninja
-
-# インストール (オプション)
-sudo ninja install
-```
-
-デフォルトでは、プラグインは`/usr/local/lib/avisynth`にインストールされます。
-
-## トラブルシューティング
-
-### CUDAが見つからない場合
-CUDA Toolkitのインストールパスが`pkg-config`で見つけられない場合は、以下のように環境変数を設定してください：
+インストール後、```nvcc```コマンドが実行可能か確認します。実行できない場合、下記でCUDAのディレクトリをパスに加えます。
 
 ```bash
-export PKG_CONFIG_PATH=/usr/local/cuda/lib64/pkgconfig:$PKG_CONFIG_PATH
+export PATH=/usr/local/cuda/bin:${PATH}
 ```
 
-### AviSynthが見つからない場合
-AviSynth+がpkg-configを通して見つけられない場合は、インストールパスを確認し、必要に応じて`PKG_CONFIG_PATH`環境変数を設定してください。 
+### AviSynth+のビルドとインストール
+
+CUDAを有効にしてビルドします。
+
+```bash
+(git clone https://github.com/AviSynth/AviSynthPlus.git \
+  && cd AviSynthPlus && mkdir build && cd build \
+  && cmake -DENABLE_CUDA=ON -DCMAKE_BUILD_TYPE=Release .. \
+  && make -j$(nproc) \
+  && sudo make install)
+```
+
+## AviSynthCUDAFiltersのビルド
+
+AviSynth+をインストール後、下記を実行します。
+
+```bash
+(git clone https://github.com/rigaya/AviSynthCUDAFilters.git \
+  && mkdir build && cd build && meson setup --buildtype release .. \
+  && ninja \
+  && sudo ninja install)
+```
+
+デフォルトでは、プラグインは```/usr/local/lib/avisynth```にインストールされます。

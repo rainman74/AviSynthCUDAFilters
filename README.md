@@ -13,6 +13,12 @@
 
 [AviSynthNeo](https://github.com/nekopanda/AviSynthPlus/wiki/Avisynth-Neo)が必要です。フィルタの使い方は[KTGMCドキュメント](https://github.com/nekopanda/AviSynthCUDAFilters/wiki/KTGMC)、[KFMドキュメント](https://github.com/nekopanda/AviSynthCUDAFilters/wiki/KFM)を参照。インターレース解除周りは[KFMDeint](https://github.com/nekopanda/AviSynthCUDAFilters/wiki/KFMDeint)を使えばほとんどの機能が使えます。
 
+# Linux対応
+
+0.7.0 でLinux対応を行いました。
+
+[インストールとビルド](./README_LINUX.md)
+
 # ライセンス
 - KTGMC: GPL
 - KNNEDI3: GPL
