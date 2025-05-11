@@ -4,7 +4,8 @@ common_sources = [
   'Copy.cu',
   'rgy_filesystem.cpp',
   'rgy_util.cpp',
-  'rgy_simd.cpp'
+  'rgy_simd.cpp',
+  'rgy_event.cpp'
 ]
 
 common_headers = [
