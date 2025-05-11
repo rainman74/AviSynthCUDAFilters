@@ -12,6 +12,7 @@ ARG DEBIAN_FRONTEND=noninteractive \
 
 RUN apt update \
     && apt-get install -y \
+      sudo \
       wget \
       curl \
       git \
