@@ -40,7 +40,7 @@ jobs:
         run: |
           REPOSITORY=$(echo ${{ github.repository }} | sed -e "s#.*/##")
           VERSION=$(echo ${{ github.ref }} | sed -e "s#refs/tags/##g")
-          IMAGE="build_nvencc_"${{ env.DOCKER_IMAGE }}
+          IMAGE="build_avisynthcudafilters_"${{ env.DOCKER_IMAGE }}
           TAG=$(echo $GITHUB_SHA | head -c7)
           NPROC=$(grep 'processor' /proc/cpuinfo | wc -l)
           OUTPUT_DIR=`pwd`/output

@@ -14,7 +14,7 @@ mv AviSynthPlus-${AVISYNTHP_VER} AviSynthPlus && \
 cd AviSynthPlus && \
 mkdir avisynth-build && \
 cd avisynth-build && \
-cmake ../ -G Ninja -DENABLE_CUDA=ON -DCMAKE_SHARED_LINKER_FLAGS="-lrt" -DCMAKE_BUILD_TYPE=Release && \
+cmake ../ -G Ninja -DENABLE_CUDA=ON -DCMAKE_BUILD_TYPE=Release && \
 ninja && \
     sudo checkinstall --maintainer="${USER}" --pkgname=avisynth --pkgversion="${AVISYNTHP_VER}" --backup=no --deldoc=yes --delspec=yes --deldesc=yes \
     --strip=yes --stripso=yes --addso=yes --fstrans=no --default ninja install
