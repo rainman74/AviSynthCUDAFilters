@@ -20,9 +20,9 @@ jobs:
           - dockerimg: ubuntu2204_cuda11
             pkgtype: deb
             arch: x86_64
-          - dockerimg: ubuntu2004_cuda11
-            pkgtype: deb
-            arch: x86_64
+          #- dockerimg: ubuntu2004_cuda11
+          #  pkgtype: deb
+          #  arch: x86_64
           #- dockerimg: ubuntu2204_cuda11_aarch64
           #  pkgtype: deb
           #  arch: arm64
