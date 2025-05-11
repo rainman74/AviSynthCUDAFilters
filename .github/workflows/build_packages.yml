@@ -15,12 +15,15 @@ jobs:
       matrix:
         include:
           - dockerimg: ubuntu2404_cuda12
+            osver: Ubuntu24.04
             pkgtype: deb
             arch: x86_64
           - dockerimg: ubuntu2204_cuda11
+            osver: Ubuntu22.04
             pkgtype: deb
             arch: x86_64
           #- dockerimg: ubuntu2004_cuda11
+          #  osver: Ubuntu20.04
           #  pkgtype: deb
           #  arch: x86_64
           #- dockerimg: ubuntu2204_cuda11_aarch64
@@ -77,8 +80,12 @@ jobs:
           docker exec build_pkg sh -c "cp -v ./AviSynthPlus/avisynth-build/avisynth_*.${{ env.PKG_TYPE }} /output/"
           docker exec build_pkg sh -c "cp -v ./build/avisynthcudafilters_*.${{ env.PKG_TYPE }} /output/"
           docker exec build_pkg sh -c "find /output/ -type f -name '*.${{ env.PKG_TYPE }}' | xargs chown $(id rigaya -u):$(id rigaya -g)"
-          PKG_AVISYNTHPLUS=`ls ${{ steps.prep.outputs.output_dir }}/avisynth_*.${{ env.PKG_TYPE }}`
-          PKG_AVISYNTHCUDAFILTERS=`ls ${{ steps.prep.outputs.output_dir }}/avisynthcudafilters_*.${{ env.PKG_TYPE }}`
+          PKG_AVISYNTHPLUS_ORG=`ls ${{ steps.prep.outputs.output_dir }}/avisynth_*.${{ env.PKG_TYPE }}`
+          PKG_AVISYNTHPLUS=`echo ${PKG_AVISYNTHPLUS_ORG} | sed -e "s/\.${{ env.PKG_TYPE }}$/_${{ matrix.osver }}.${{ env.PKG_TYPE }}/"`
+          PKG_AVISYNTHCUDAFILTERS_ORG=`ls ${{ steps.prep.outputs.output_dir }}/avisynthcudafilters_*.${{ env.PKG_TYPE }}`
+          PKG_AVISYNTHCUDAFILTERS=`echo ${PKG_AVISYNTHCUDAFILTERS_ORG} | sed -e "s/\.${{ env.PKG_TYPE }}$/_${{ matrix.osver }}.${{ env.PKG_TYPE }}/"`
+          mv ${PKG_AVISYNTHPLUS_ORG} ${PKG_AVISYNTHPLUS}
+          mv ${PKG_AVISYNTHCUDAFILTERS_ORG} ${PKG_AVISYNTHCUDAFILTERS}
           echo ${PKG_AVISYNTHPLUS}
           echo ${PKG_AVISYNTHCUDAFILTERS}
           echo "pkg_avisynthplus=${PKG_AVISYNTHPLUS}" >> $GITHUB_OUTPUT
