@@ -1,6 +1,9 @@
 #include "avisynth.h"
 
 #include "rgy_osdep.h"
+#if (defined(_WIN32) || defined(_WIN64))
+#include "psapi.h"
+#endif
 #include <iostream>
 #include <string>
 #include <algorithm>

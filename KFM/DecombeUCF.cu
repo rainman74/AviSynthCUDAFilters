@@ -1,7 +1,11 @@
 
 #include <stdint.h>
+#include "TextOut.h"
 #include <avisynth.h>
+
+#if !(defined(_WIN32) || defined(_WIN64))
 #include "rgy_osdep.h"
+#endif
 
 #include <algorithm>
 #include <memory>
@@ -14,7 +18,6 @@
 #include "VectorFunctions.cuh"
 #include "ReduceKernel.cuh"
 #include "KFMFilterBase.cuh"
-#include "TextOut.h"
 
 static int scaleParam(float thresh, int pixelBits)
 {

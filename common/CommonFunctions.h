@@ -38,7 +38,13 @@ inline static int nlog2(int i)
   return result;
 #else
   assert(i > 0);
+#if _MSC_VER
+  unsigned long result;
+  _BitScanReverse(&result, i);
+  return result;
+#else
   return __builtin_ctz(i);
+#endif
 #endif
 }
 
