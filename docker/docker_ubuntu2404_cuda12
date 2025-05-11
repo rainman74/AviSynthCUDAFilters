@@ -1,0 +1,55 @@
+FROM ubuntu:24.04
+
+ARG DEBIAN_FRONTEND=noninteractive \
+    OSVER=ubuntu2204 \
+    LOCAL_USER_ID=1000 \
+    LOCAL_GROUP_ID=1000 \
+    CUDA_VER_MAJOR=12 \
+    CUDA_VER_MINOR=4 \
+    CUDA_DEB_URL=https://developer.download.nvidia.com/compute/cuda/12.4.1/local_installers/cuda-repo-ubuntu2204-12-4-local_12.4.1-550.54.15-1_amd64.deb \
+    CUDA_DEB_NAME=cuda-repo-ubuntu2204-12-4-local_12.4.1-550.54.15-1_amd64.deb \
+    CUDA_GPG_PATH=/var/cuda-repo-ubuntu2204-12-4-local
+
+RUN apt update \
+    && apt-get install -y \
+      wget \
+      curl \
+      git \
+      build-essential \
+      libavcodec60 \
+      libavcodec-dev \
+      libavutil58 \
+      libavutil-dev \
+      libavformat60 \
+      libavformat-dev \
+      libswresample4 \
+      libswresample-dev \
+      libavfilter9 \
+      libavfilter-dev \
+      libavdevice60 \
+      libavdevice-dev \
+      libass9 \
+      libass-dev \
+      openssl \
+      libssl-dev \
+      libx11-dev \
+      libplacebo-dev \
+    && wget -q https://developer.download.nvidia.com/compute/cuda/repos/${OSVER}/x86_64/cuda-${OSVER}.pin \
+    && mv cuda-${OSVER}.pin /etc/apt/preferences.d/cuda-repository-pin-600 \
+    && wget -q ${CUDA_DEB_URL} \
+    && dpkg -i ${CUDA_DEB_NAME} \
+    && cp ${CUDA_GPG_PATH}/cuda-*-keyring.gpg /usr/share/keyrings/ \
+    && apt-get update \
+    && apt-get -y install cuda-drivers cuda-compiler-${CUDA_VER_MAJOR}-${CUDA_VER_MINOR} cuda-cudart-dev-${CUDA_VER_MAJOR}-${CUDA_VER_MINOR} cuda-driver-dev-${CUDA_VER_MAJOR}-${CUDA_VER_MINOR} cuda-nvrtc-dev-${CUDA_VER_MAJOR}-${CUDA_VER_MINOR} libcurand-dev-${CUDA_VER_MAJOR}-${CUDA_VER_MINOR} libnpp-dev-${CUDA_VER_MAJOR}-${CUDA_VER_MINOR} cuda-nvml-dev-${CUDA_VER_MAJOR}-${CUDA_VER_MINOR} \
+    && rm -f ${CUDA_DEB_NAME} \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/* \
+    && ln -s /usr/local/cuda-${CUDA_VER_MAJOR}.${CUDA_VER_MINOR} /usr/local/cuda
+
+RUN useradd -u $LOCAL_USER_ID -m --user-group --shell /bin/bash rigaya
+RUN groupmod -og $LOCAL_GROUP_ID rigaya
+WORKDIR /home/rigaya
+COPY . .
+RUN chown -R rigaya:rigaya .
+USER rigaya
+
