@@ -5,6 +5,11 @@ SHORTVER=$(echo $VER | sed -E 's/-g[0-9a-f]+$//')
 #gitコマンドのユーザーを取得
 USER=$(git config --get user.name)
 
+# nvccが見つからなければ、/usr/local/cuda/binをPATHに追加
+if ! command -v nvcc &> /dev/null; then
+    export PATH="/usr/local/cuda/bin:$PATH"
+fi
+
 [ -d build ] || mkdir build && \
 cd build && \
 meson setup --buildtype release .. && \
