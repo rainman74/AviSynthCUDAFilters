@@ -71,11 +71,12 @@ jobs:
         id: build_exec
         run: |
           docker build --build-arg LOCAL_USER_ID=${{ steps.prep.outputs.local_user_id }} --build-arg LOCAL_GROUP_ID=${{ steps.prep.outputs.local_group_id }} --tag ${{ steps.prep.outputs.tagged_image }} --platform linux/${{ matrix.arch }} --file ${{ env.DOCKER_FILE }} ./
-          docker run -dit --rm -v ${{ steps.prep.outputs.output_dir }}:/output -u "$(id -u):$(id -g)" --name build_pkg ${{ steps.prep.outputs.tagged_image }}
+          docker run -dit --rm -v ${{ steps.prep.outputs.output_dir }}:/output --name build_pkg ${{ steps.prep.outputs.tagged_image }}
           docker exec build_pkg ./scripts/buildAviSynthPlusCUDA.sh
           docker exec build_pkg ./scripts/buildAviSynthCUDAFilters.sh
           docker exec build_pkg sh -c "cp -v ./AviSynthPlus/avisynth-build/avisynth_*.${{ env.PKG_TYPE }} /output/"
           docker exec build_pkg sh -c "cp -v ./build/avisynthcudafilters_*.${{ env.PKG_TYPE }} /output/"
+          docker exec build_pkg sh -c "find /output/ -type f -name '*.${{ env.PKG_TYPE }}' | xargs chown $(id rigaya -u):$(id rigaya -g)"
           PKG_AVISYNTHPLUS=`ls ${{ steps.prep.outputs.output_dir }}/avisynth_*.${{ env.PKG_TYPE }}`
           PKG_AVISYNTHCUDAFILTERS=`ls ${{ steps.prep.outputs.output_dir }}/avisynthcudafilters_*.${{ env.PKG_TYPE }}`
           echo ${PKG_AVISYNTHPLUS}

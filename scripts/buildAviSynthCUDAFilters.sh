@@ -5,7 +5,7 @@ SHORTVER=$(echo $VER | sed -E 's/-g[0-9a-f]+$//')
 #gitコマンドのユーザーを取得
 USER=$(git config --get user.name)
 
-mkdir build && \
+[ -d build ] || mkdir build && \
 cd build && \
 meson setup --buildtype release .. && \
 ninja && \

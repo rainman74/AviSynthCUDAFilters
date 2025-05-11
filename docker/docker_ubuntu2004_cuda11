@@ -38,8 +38,5 @@ RUN apt update \
 
 RUN useradd -u $LOCAL_USER_ID -m --user-group --shell /bin/bash rigaya
 RUN groupmod -og $LOCAL_GROUP_ID rigaya
-WORKDIR /home/rigaya
+WORKDIR /root
 COPY . .
-RUN chown -R rigaya:rigaya .
-USER rigaya
-
