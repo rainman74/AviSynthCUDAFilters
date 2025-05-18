@@ -79,8 +79,15 @@ public:
     , isRGB(vi.IsPlanarRGB() || vi.IsPlanarRGBA())
   {
     PNeoEnv env = env_;
-    systemFrameAlign = (int)env->GetProperty(AEP_FRAME_ALIGN);
-		systemPlaneAlign = (int)env->GetProperty(AEP_PLANE_ALIGN);
+    // ‚±‚ê‚ª‚æ‚¢‚Ì‚©‚Í‚í‚©‚ç‚ñ‚ª...CUDA‚Ìê‡‚Ì‚ÝAEP_FRAME_ALIGN‚ðŒ©‚És‚­‚æ‚¤‚É‚µ‚È‚¢‚ÆA
+    // CPU‚Ìê‡‚É[Align]: New allocated frame is not aligned !!!‚ªo‚Ä‚µ‚Ü‚¤
+    if (IS_CUDA) {
+      systemFrameAlign = (int)env->GetProperty(AEP_FRAME_ALIGN);
+		  systemPlaneAlign = (int)env->GetProperty(AEP_PLANE_ALIGN);
+    } else {
+      systemFrameAlign = FRAME_ALIGN;
+		  systemPlaneAlign = FRAME_ALIGN;
+    }
   }
 
   PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env_)
