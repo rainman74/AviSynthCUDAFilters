@@ -229,6 +229,9 @@ void cpu_copy(pixel_t* dst, const pixel_t* __restrict__ src, int width, int heig
   }
 }
 
+template void cpu_copy<uint8_t>(uint8_t* dst, const uint8_t* __restrict__ src, int width, int height, int pitch);
+template void cpu_copy<uint16_t>(uint16_t* dst, const uint16_t* __restrict__ src, int width, int height, int pitch);
+
 template <typename pixel_t>
 __global__ void kl_copy(pixel_t* dst, const pixel_t* __restrict__ src, int width, int height, int pitch)
 {
@@ -466,6 +469,8 @@ void cpu_copy_border(pixel_t* dst,
 
 template void cpu_copy_border(uint8_t* dst,
   const uint8_t* src, int width, int height, int pitch, int vborder);
+template void cpu_copy_border(uint16_t* dst,
+  const uint16_t* src, int width, int height, int pitch, int vborder);
 
 template <typename pixel_t>
 __global__ void kl_copy_border(pixel_t* dst,
