@@ -411,6 +411,8 @@ void cpu_padv(pixel_t* dst, int width, int height, int pitch, int vpad)
 
 template void cpu_padv(uint8_t* dst, int width, int height, int pitch, int vpad);
 template void cpu_padv(uint16_t* dst, int width, int height, int pitch, int vpad);
+template void cpu_padv(uchar4* dst, int width, int height, int pitch, int vpad);
+template void cpu_padv(ushort4* dst, int width, int height, int pitch, int vpad);
 
 template <typename pixel_t>
 __global__ void kl_padv(pixel_t* dst, int width, int height, int pitch, int vpad)
