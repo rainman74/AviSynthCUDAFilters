@@ -1479,13 +1479,25 @@ class SharpenFilter : public KFMFilterBase
 
         if (IS_CUDA) {
             if (!IsAligned(src, vi, env)) {
-                env->ThrowError("[SharpenFilter]: source filter returns unaligned frame");
+                env->ThrowError("[SharpenFilter]: source filter returns unaligned frame [src] %dx%d(%p,%p,%p)[%d,%d,%d]-%d,%d",
+                    src.width, src.height,
+                    src.GetReadPtr<uint8_t>(PLANAR_Y), src.GetReadPtr<uint8_t>(PLANAR_U), src.GetReadPtr<uint8_t>(PLANAR_V),
+                    src.GetPitch<uint8_t>(PLANAR_Y), src.GetPitch<uint8_t>(PLANAR_U), src.GetPitch<uint8_t>(PLANAR_V),
+                    env->GetProperty(AEP_FRAME_ALIGN), env->GetProperty(AEP_PLANE_ALIGN));
             }
             if (!IsAligned(unsharp, vi, env)) {
-                env->ThrowError("[SharpenFilter]: source filter returns unaligned frame");
+                env->ThrowError("[SharpenFilter]: source filter returns unaligned frame [unsharp] %dx%d(%p,%p,%p)[%d,%d,%d]-%d,%d",
+                    unsharp.width, unsharp.height,
+                    unsharp.GetReadPtr<uint8_t>(PLANAR_Y), unsharp.GetReadPtr<uint8_t>(PLANAR_U), unsharp.GetReadPtr<uint8_t>(PLANAR_V),
+                    unsharp.GetPitch<uint8_t>(PLANAR_Y), unsharp.GetPitch<uint8_t>(PLANAR_U), unsharp.GetPitch<uint8_t>(PLANAR_V),
+                    env->GetProperty(AEP_FRAME_ALIGN), env->GetProperty(AEP_PLANE_ALIGN));
             }
             if (!IsAligned(qp, vi, env)) {
-                env->ThrowError("[SharpenFilter]: source filter returns unaligned frame");
+                env->ThrowError("[SharpenFilter]: source filter returns unaligned frame [qp] %dx%d(%p,%p,%p)[%d,%d,%d]-%d,%d",
+                    qp.width, qp.height,
+                    qp.GetReadPtr<uint8_t>(PLANAR_Y), qp.GetReadPtr<uint8_t>(PLANAR_U), qp.GetReadPtr<uint8_t>(PLANAR_V),
+                    qp.GetPitch<uint8_t>(PLANAR_Y), qp.GetPitch<uint8_t>(PLANAR_U), qp.GetPitch<uint8_t>(PLANAR_V),
+                    env->GetProperty(AEP_FRAME_ALIGN), env->GetProperty(AEP_PLANE_ALIGN));
             }
         }
 
