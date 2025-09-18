@@ -1,6 +1,7 @@
-# AviSynth CUDA Filters
+AviSynth CUDA Filters
+=====================
 
-This is a CUDA implementation filter plugin for [AviSynthNeo](https://github.com/rainman74/AviSynthNeo).  
+**AviSynth CUDA Filters** are filter plugins for [AviSynthNeo](https://github.com/rainman74/AviSynthNeo).  
 The following projects are included:
 
 - KTGMC (CUDA version of QTGMC)  
