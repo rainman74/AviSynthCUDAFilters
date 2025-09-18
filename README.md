@@ -1,28 +1,36 @@
 # AviSynth CUDA Filters
 
-[AviSynthNeo](https://github.com/nekopanda/AviSynthPlus/wiki/Avisynth-Neo)用のCUDA実装フィルタプラグインです。
-以下のプロジェクトがあります。
+This is a CUDA implementation filter plugin for [AviSynthNeo](https://github.com/rainman74/AviSynthNeo).  
+The following projects are included:
 
-- KTGMC (QTGMCのCUDA版)
-- KNNEDI3 (NNEDI3のCUDA版)
-- KFM (独自実装のフィルタ)
-- AvsCUDA（AviSynth内部フィルタのCUDA対応版）
-- GRunT（Neo対応版GrunT）
+- KTGMC (CUDA version of QTGMC)  
+- KNNEDI3 (CUDA version of NNEDI3)  
+- KFM (originally implemented filter)  
+- AvsCUDA (CUDA-enabled version of internal AviSynth filters)  
+- GRunT (Neo-compatible version of GrunT)  
 
-# 使い方
+## Integrated External Projects
 
-[AviSynthNeo](https://github.com/nekopanda/AviSynthPlus/wiki/Avisynth-Neo)が必要です。フィルタの使い方は[KTGMCドキュメント](https://github.com/nekopanda/AviSynthCUDAFilters/wiki/KTGMC)、[KFMドキュメント](https://github.com/nekopanda/AviSynthCUDAFilters/wiki/KFM)を参照。インターレース解除周りは[KFMDeint](https://github.com/nekopanda/AviSynthCUDAFilters/wiki/KFMDeint)を使えばほとんどの機能が使えます。
+This repository includes the complete source code of the following external projects:
 
-# Linux対応
+- **NNEDI3** (from [rainman74/NNEDI3](https://github.com/rainman74/NNEDI3)) - Located in `extern/NNEDI3/`
+- **masktools** (from [pinterf/masktools](https://github.com/pinterf/masktools)) - Located in `extern/masktools/`
 
-0.7.0 でLinux対応を行いました。
+These projects have been integrated directly (not as submodules) to ensure full source code availability and compatibility with the Visual Studio build system.
 
-[インストールとビルド](./README_LINUX.md)
+# Usage
 
-# ライセンス
-- KTGMC: GPL
-- KNNEDI3: GPL
-- KFM: **MIT**
-- AvsCUDA: GPL
-- GRunT: GPL
+[AviSynthNeo](https://github.com/rainman74/AviSynthNeo) is required.  
+For filter usage, see the [KTGMC documentation](https://github.com/rainman74/AviSynthCUDAFilters/wiki/KTGMC) and [KFM documentation](https://github.com/rainman74/AviSynthCUDAFilters/wiki/KFM).  
+For deinterlacing-related functionality, most features can be accessed using [KFMDeint](https://github.com/rainman74/AviSynthCUDAFilters/wiki/KFMDeint).
 
+# License
+- KTGMC: GPL  
+- KNNEDI3: GPL  
+- KFM: **MIT**  
+- AvsCUDA: GPL  
+- GRunT: GPL  
+
+## External Project Licenses
+- **NNEDI3** (`extern/NNEDI3/`): GPL v2 (see `extern/NNEDI3/gpl.txt`)
+- **masktools** (`extern/masktools/`): MIT License (see `extern/masktools/LICENSE`)
