@@ -13,8 +13,8 @@ The following projects are included:
 
 This repository includes the complete source code of the following external projects:
 
-- **NNEDI3** (from [rainman74/NNEDI3](https://github.com/rainman74/NNEDI3)) - Located in `extern/NNEDI3/`
-- **masktools** (from [pinterf/masktools](https://github.com/pinterf/masktools)) - Located in `extern/masktools/`
+- **NNEDI3** (from [rainman74/NNEDI3](https://github.com/rainman74/NNEDI3)) - Located in `NNEDI3/`
+- **masktools** (from [rainman74/masktools](https://github.com/rainman74/masktools)) - Located in `masktools/`
 
 These projects have been integrated directly (not as submodules) to ensure full source code availability and compatibility with the Visual Studio build system.
 
@@ -32,5 +32,5 @@ For deinterlacing-related functionality, most features can be accessed using [KF
 - GRunT: GPL  
 
 ## External Project Licenses
-- **NNEDI3** (`extern/NNEDI3/`): GPL v2 (see `extern/NNEDI3/gpl.txt`)
-- **masktools** (`extern/masktools/`): MIT License (see `extern/masktools/LICENSE`)
+- **NNEDI3** (`NNEDI3/`): GPL v2 (see `NNEDI3/gpl.txt`)
+- **masktools** (`masktools/`): MIT License (see `masktools/LICENSE`)
